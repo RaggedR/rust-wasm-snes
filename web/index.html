@@ -303,7 +303,7 @@
             loopGeneration++;
             if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
 
-            await init();
+            const wasm = await init();
             console.log('WASM ready. Creating emulator...');
 
             try {
@@ -396,13 +396,24 @@
 
                 // Run up to 2 frames per rAF to catch up, but cap to avoid spiral
                 let framesRun = 0;
+                // Cache fb pointer/length once per loop iteration. They don't
+                // change unless WASM memory grows (the emulator doesn't grow
+                // memory after init), so this could even be hoisted further.
                 while (frameAccumulator >= FRAME_TIME && framesRun < 2) {
-                    const rgba = emulator.run_frame();
-                    const imageData = new ImageData(new Uint8ClampedArray(rgba), 256, 224);
+                    emulator.run_frame_no_return();
+                    const fbPtr = emulator.framebuffer_ptr();
+                    const fbLen = emulator.framebuffer_len();
+                    // Construct a Uint8ClampedArray view directly over WASM
+                    // linear memory — no copy across the language boundary.
+                    const fbView = new Uint8ClampedArray(wasm.memory.buffer, fbPtr, fbLen);
+                    const imageData = new ImageData(fbView, 256, 224);
                     ctx.putImageData(imageData, 0, 0);
 
                     // Always drain audio samples to prevent Rust-side accumulation.
-                    const samples = emulator.get_audio_samples();
+                    // Zero-copy: read from WASM memory directly, clear after.
+                    const audioPtr = emulator.audio_samples_ptr();
+                    const audioLen = emulator.audio_samples_len();
+                    const samples = new Int16Array(wasm.memory.buffer, audioPtr, audioLen);
                     if (audioStarted && samples.length >= 2) {
                         const stereoSamples = samples.length >> 1;
                         // Write interleaved i16 stereo samples to ring buffer.
@@ -413,6 +424,9 @@
                             ringWrite++;
                         }
                     }
+                    // Clear after reading. Done unconditionally so the WASM-side
+                    // buffer doesn't accumulate when audio is suspended.
+                    emulator.clear_audio_samples();
 
                     // Cap ring buffer to prevent drift/speedup.
                     const MAX_BUFFERED = 4096;
