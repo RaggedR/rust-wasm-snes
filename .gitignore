@@ -5,3 +5,4 @@ reference/
 rom/
 *.smc
 *.sfc
+.DS_Store

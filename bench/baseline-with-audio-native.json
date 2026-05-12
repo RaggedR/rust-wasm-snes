@@ -1,0 +1,21 @@
+{
+  "label": "baseline-with-audio",
+  "rom": "rom/smw.smc",
+  "rom_size_bytes": 1049088,
+  "frames": 600,
+  "init_time_us": 93,
+  "frame_time_us": {
+    "min": 510,
+    "mean": 1639,
+    "p50": 1997,
+    "p95": 2173,
+    "p99": 2236,
+    "max": 2303
+  },
+  "emulated_fps": 610.1,
+  "run_total_us": 986850,
+  "total_fb_bytes_returned": 137625600,
+  "final_fb_hash": "54b3eed74f9f8432",
+  "total_audio_samples": 648224,
+  "final_audio_hash": "62300ecfc4da23e0"
+}

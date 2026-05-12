@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SNES Bench — runs N frames and emits window.__benchResult</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, monospace; background:#111; color:#ddd; padding:20px; max-width: 900px; margin: auto; }
+  h1 { font-size: 18px; }
+  pre { background:#000; padding:12px; border-radius:6px; overflow-x:auto; white-space:pre-wrap; }
+  .ok { color:#7eff7e; }
+  .err { color:#ff7e7e; }
+  .stat { color:#9be; }
+  #status { margin: 12px 0; }
+  #log { font-size: 12px; max-height: 200px; overflow-y: auto; }
+</style>
+</head>
+<body>
+<h1>SNES Emulator Bench</h1>
+<div id="status">Loading…</div>
+<pre id="result"></pre>
+<pre id="log"></pre>
+
+<script type="module">
+  import init, { Emulator } from './pkg/zelda_a_link_to_the_past.js';
+
+  // Bench parameters — overridable via URL query string for the CLI runner.
+  const params = new URLSearchParams(location.search);
+  const FRAMES = parseInt(params.get('frames') || '600', 10);
+  const ROM_URL = params.get('rom') || './rom/zelda3.smc';
+  const LABEL = params.get('label') || 'browser-unlabeled';
+
+  const statusEl = document.getElementById('status');
+  const resultEl = document.getElementById('result');
+  const logEl = document.getElementById('log');
+  function logLine(msg) {
+    logEl.textContent += msg + '\n';
+    console.log(msg);
+  }
+
+  // FNV-1a 64-bit (split into two 32-bit halves to dodge JS's lack of u64).
+  // We use this purely for determinism comparison against the native bench
+  // hash — they both hash the same RGBA framebuffer bytes.
+  function fnv1a64(bytes) {
+    // Operate as BigInt to keep semantics identical to the Rust side.
+    let h = 0xcbf29ce484222325n;
+    const prime = 0x100000001b3n;
+    const mask = 0xffffffffffffffffn;
+    for (let i = 0; i < bytes.length; i++) {
+      h = (h ^ BigInt(bytes[i])) & mask;
+      h = (h * prime) & mask;
+    }
+    return h.toString(16).padStart(16, '0');
+  }
+
+  function percentile(sortedArr, p) {
+    const idx = Math.min(sortedArr.length - 1, Math.floor(sortedArr.length * p / 100));
+    return sortedArr[idx];
+  }
+
+  async function main() {
+    try {
+      // ── Stage 1: cold-load WASM (init + ROM fetch).
+      const t_load_start = performance.now();
+      const wasm = await init();
+      const t_init_done = performance.now();
+
+      const romResp = await fetch(ROM_URL);
+      if (!romResp.ok) throw new Error(`ROM fetch failed: ${romResp.status}`);
+      const romBytes = new Uint8Array(await romResp.arrayBuffer());
+      const t_rom_done = performance.now();
+
+      // ── Stage 2: emulator construction.
+      const t_ctor_start = performance.now();
+      const emulator = new Emulator(romBytes);
+      const t_ctor_done = performance.now();
+
+      logLine(`WASM init: ${(t_init_done - t_load_start).toFixed(2)} ms`);
+      logLine(`ROM fetch: ${(t_rom_done - t_init_done).toFixed(2)} ms (${romBytes.length} bytes)`);
+      logLine(`Emulator constructor: ${(t_ctor_done - t_ctor_start).toFixed(2)} ms`);
+
+      // ── Stage 3: run frames. Path selectable via ?path=zero-copy|copy.
+      // - 'copy' (default): legacy run_frame() returns Vec<u8>, wasm-bindgen
+      //   copies it into a new JS Uint8Array each frame.
+      // - 'zero-copy': run_frame_no_return() leaves the framebuffer in
+      //   WASM memory; we construct a Uint8ClampedArray view over it.
+      const PATH = params.get('path') || 'copy';
+      logLine(`Path: ${PATH}`);
+
+      // Cache the framebuffer pointer/length once. They don't change unless
+      // WASM memory grows, which our emulator doesn't do after init.
+      const fbPtr = emulator.framebuffer_ptr();
+      const fbLen = emulator.framebuffer_len();
+
+      statusEl.textContent = `Running ${FRAMES} frames (${PATH} path)…`;
+      const frameTimesUs = new Float64Array(FRAMES);
+      const audioTimesUs = new Float64Array(FRAMES);
+      let totalFbBytes = 0;
+      let totalAudioSamples = 0;
+      let finalFbHash = '';
+
+      const t_run_start = performance.now();
+      for (let i = 0; i < FRAMES; i++) {
+        let fb;
+        const t_frame_start = performance.now();
+        if (PATH === 'zero-copy') {
+          emulator.run_frame_no_return();
+          // wasm.memory.buffer can change if memory grows — refresh the view
+          // each frame for safety. The view itself is allocation-free.
+          fb = new Uint8ClampedArray(wasm.memory.buffer, fbPtr, fbLen);
+        } else {
+          fb = emulator.run_frame();
+        }
+        const t_frame_done = performance.now();
+        frameTimesUs[i] = (t_frame_done - t_frame_start) * 1000;
+        totalFbBytes += fb.length;
+
+        const t_audio_start = performance.now();
+        let audioSampleCount;
+        if (PATH === 'zero-copy') {
+          // Zero-copy audio: read samples from WASM memory via Int16Array view,
+          // then explicitly clear so the buffer doesn't grow unbounded.
+          const audioPtr = emulator.audio_samples_ptr();
+          const audioLen = emulator.audio_samples_len();
+          // Build the view (cost: ~µs, no actual byte copy). Touch length so
+          // the JIT doesn't optimize this away — mirrors what real consumers do.
+          // eslint-disable-next-line no-unused-vars
+          const samples = new Int16Array(wasm.memory.buffer, audioPtr, audioLen);
+          audioSampleCount = samples.length;
+          emulator.clear_audio_samples();
+        } else {
+          const samples = emulator.get_audio_samples();
+          audioSampleCount = samples.length;
+        }
+        const t_audio_done = performance.now();
+        audioTimesUs[i] = (t_audio_done - t_audio_start) * 1000;
+        totalAudioSamples += audioSampleCount;
+
+        if (i === FRAMES - 1) {
+          finalFbHash = fnv1a64(fb);
+        }
+      }
+      const t_run_done = performance.now();
+
+      // ── Stage 4: distribution stats.
+      const sortedFrame = Float64Array.from(frameTimesUs).sort();
+      const sortedAudio = Float64Array.from(audioTimesUs).sort();
+      const sumFrame = frameTimesUs.reduce((a, b) => a + b, 0);
+      const sumAudio = audioTimesUs.reduce((a, b) => a + b, 0);
+
+      const result = {
+        label: LABEL,
+        rom: ROM_URL,
+        rom_size_bytes: romBytes.length,
+        frames: FRAMES,
+        wasm_init_ms: +(t_init_done - t_load_start).toFixed(3),
+        rom_fetch_ms: +(t_rom_done - t_init_done).toFixed(3),
+        ctor_ms: +(t_ctor_done - t_ctor_start).toFixed(3),
+        cold_load_ms: +(t_ctor_done - t_load_start).toFixed(3),
+        frame_time_us: {
+          min: +sortedFrame[0].toFixed(2),
+          mean: +(sumFrame / FRAMES).toFixed(2),
+          p50: +percentile(sortedFrame, 50).toFixed(2),
+          p95: +percentile(sortedFrame, 95).toFixed(2),
+          p99: +percentile(sortedFrame, 99).toFixed(2),
+          max: +sortedFrame[sortedFrame.length - 1].toFixed(2),
+        },
+        audio_drain_us: {
+          min: +sortedAudio[0].toFixed(2),
+          mean: +(sumAudio / FRAMES).toFixed(2),
+          p50: +percentile(sortedAudio, 50).toFixed(2),
+          p95: +percentile(sortedAudio, 95).toFixed(2),
+          p99: +percentile(sortedAudio, 99).toFixed(2),
+          max: +sortedAudio[sortedAudio.length - 1].toFixed(2),
+        },
+        emulated_fps: +((1_000_000 / (sumFrame / FRAMES))).toFixed(1),
+        run_total_ms: +(t_run_done - t_run_start).toFixed(2),
+        total_fb_bytes_returned: totalFbBytes,
+        total_audio_samples_returned: totalAudioSamples,
+        final_fb_hash: finalFbHash,
+        // Audio hash is computed Rust-side as samples are drained/cleared
+        // — much cheaper than hashing in JS BigInt loops. Just read the
+        // accumulated value at the end.
+        final_audio_hash: emulator.audio_samples_hash(),
+        path: PATH,
+        // Browser fingerprint — different UA/CPU produces different absolute numbers.
+        user_agent: navigator.userAgent,
+        hardware_concurrency: navigator.hardwareConcurrency || null,
+      };
+
+      window.__benchResult = result;
+      statusEl.innerHTML = `<span class="ok">Done.</span> Mean frame: ${result.frame_time_us.mean.toFixed(0)}µs · FB hash: <span class="stat">${finalFbHash}</span>`;
+      resultEl.textContent = JSON.stringify(result, null, 2);
+    } catch (err) {
+      statusEl.innerHTML = `<span class="err">FAILED:</span> ${err.message}`;
+      logLine(`ERROR: ${err.stack || err.message}`);
+      window.__benchResult = { error: err.message, stack: err.stack };
+    }
+  }
+
+  main();
+</script>
+</body>
+</html>
