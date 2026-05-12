@@ -1,0 +1,14 @@
+{
+  "name": "rust-wasm-snes-bench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Benchmark harness — drives web/bench.html via headless Chromium and emits JSON.",
+  "scripts": {
+    "bench": "node bench-cli.js",
+    "compare": "node compare.js"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}

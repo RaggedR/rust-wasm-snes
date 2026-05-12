@@ -1,0 +1,19 @@
+{
+  "label": "baseline-native",
+  "rom": "rom/smw.smc",
+  "rom_size_bytes": 1049088,
+  "frames": 600,
+  "init_time_us": 99,
+  "frame_time_us": {
+    "min": 515,
+    "mean": 1654,
+    "p50": 2010,
+    "p95": 2218,
+    "p99": 2339,
+    "max": 2398
+  },
+  "emulated_fps": 604.6,
+  "run_total_us": 994330,
+  "total_fb_bytes_returned": 137625600,
+  "final_fb_hash": "54b3eed74f9f8432"
+}

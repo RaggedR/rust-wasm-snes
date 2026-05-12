@@ -1,0 +1,34 @@
+{
+  "label": "after-audio-zerocopy",
+  "rom": "./rom/zelda3.smc",
+  "rom_size_bytes": 1049088,
+  "frames": 600,
+  "wasm_init_ms": 10.15,
+  "rom_fetch_ms": 8.75,
+  "ctor_ms": 4.935,
+  "cold_load_ms": 23.835,
+  "frame_time_us": {
+    "min": 480,
+    "mean": 1764.82,
+    "p50": 2140,
+    "p95": 2325,
+    "p99": 2395,
+    "max": 3680
+  },
+  "audio_drain_us": {
+    "min": 0,
+    "mean": 1.21,
+    "p50": 0,
+    "p95": 5,
+    "p99": 10,
+    "max": 55
+  },
+  "emulated_fps": 566.6,
+  "run_total_ms": 1075.27,
+  "total_fb_bytes_returned": 137625600,
+  "total_audio_samples_returned": 648224,
+  "final_fb_hash": "54b3eed74f9f8432",
+  "path": "zero-copy",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36",
+  "hardware_concurrency": 10
+}

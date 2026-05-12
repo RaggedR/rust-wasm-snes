@@ -1,0 +1,19 @@
+{
+  "label": "after-zero-copy-native",
+  "rom": "rom/smw.smc",
+  "rom_size_bytes": 1049088,
+  "frames": 600,
+  "init_time_us": 145,
+  "frame_time_us": {
+    "min": 511,
+    "mean": 1646,
+    "p50": 2006,
+    "p95": 2197,
+    "p99": 2289,
+    "max": 2323
+  },
+  "emulated_fps": 607.5,
+  "run_total_us": 989009,
+  "total_fb_bytes_returned": 137625600,
+  "final_fb_hash": "54b3eed74f9f8432"
+}
