@@ -278,6 +278,27 @@ impl Apu {
     /// and instructions that overshoot drive the debt negative. This prevents
     /// the ~4x amplification bug where frequent small calls (e.g., 1 SPC cycle)
     /// each run a full instruction (4+ cycles) without compensating for overshoot.
+    ///
+    /// # Algebraic properties (catch-up contract)
+    ///
+    /// These properties hold for the *total cycles executed* given the same
+    /// initial `cycle_debt` state:
+    ///
+    /// - **Zero-identity**: `run_cycles(0)` is a no-op. The debt doesn't
+    ///   change and no instructions execute.
+    ///
+    /// - **Monotonicity**: `run_cycles(n)` where `n > 0` will eventually
+    ///   advance the SPC700 by at least one instruction (modulo negative
+    ///   debt from prior overshoot). Total cycles executed is monotonically
+    ///   non-decreasing in the cumulative debt.
+    ///
+    /// - **Approximate associativity**: `run_cycles(a); run_cycles(b)` and
+    ///   `run_cycles(a + b)` deliver the same total SPC cycles to within
+    ///   one instruction boundary. They are NOT strictly equivalent because
+    ///   SPC instructions are variable-length (2-8 cycles) and the debt
+    ///   carried between calls affects which instruction boundary the next
+    ///   call starts from. This is the root cause of the T10 audio
+    ///   divergence documented in `docs/T10_IDLE_LOOP_DETECTION.md` section 4.3.
     pub fn run_cycles(&mut self, target_cycles: u32) {
         self.cycle_debt += target_cycles as i64;
 
@@ -317,7 +338,26 @@ impl Apu {
     }
 
     /// Run APU for the equivalent of `master_cycles` main CPU master clocks.
-    /// Uses a fractional accumulator for precise timing (main clock / 21 ≈ SPC clock).
+    ///
+    /// Converts master cycles to SPC700 cycles using a fractional accumulator
+    /// (master clock / 21 ~ SPC clock) and delegates to [`run_cycles`].
+    ///
+    /// # Algebraic properties (catch-up contract)
+    ///
+    /// - **Zero-identity**: `catch_up(0)` is a no-op (no fractional accumulation,
+    ///   no SPC cycles dispatched).
+    ///
+    /// - **Monotonicity**: For `n > 0`, `catch_up(n)` advances `cycle_frac` and
+    ///   may trigger `run_cycles`. The fractional accumulator ensures that over
+    ///   long runs, the SPC/master cycle ratio converges to 1/21.
+    ///
+    /// - **Non-distributivity of integer division**: `catch_up(a); catch_up(b)`
+    ///   is NOT identical to `catch_up(a + b)` because `floor((f+a)/21) +
+    ///   floor((f'+b)/21)` may differ from `floor((f+a+b)/21)` depending on the
+    ///   fractional state `f`. This is acceptable for the JIT sync model where
+    ///   calls are infrequent (port accesses + scanline flush) but was the root
+    ///   cause of the T10 idle-skip audio divergence under the old per-instruction
+    ///   model.
     pub fn catch_up(&mut self, master_cycles: u32) {
         // SPC700 clock = master clock / 21 (approximately).
         // Use fixed-point: accumulate master cycles, divide by 21.

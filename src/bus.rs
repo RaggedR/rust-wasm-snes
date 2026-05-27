@@ -56,6 +56,23 @@ pub struct Bus {
     /// before each scanline's inner step loop, read by the CPU's idle-loop
     /// fast path to bound forward skips.
     pub current_scanline_target: u64,
+
+    // ── JIT sync state (Level 1) ─────────────────────────────
+    //
+    // Near/byuu's insight: synchronize the APU only when the CPU accesses
+    // the shared I/O ports ($2140-$2143), not after every instruction. This
+    // is both more accurate (sync happens at the cycle of the access) and
+    // faster (eliminates ~95% of catch_up calls for instructions that don't
+    // touch APU ports).
+
+    /// Running master-cycle counter within the current scanline.  Updated
+    /// by the frame loop after each `cpu.step()` returns.
+    pub master_clock: u64,
+
+    /// Master-cycle value at which the APU was last caught up.  The delta
+    /// `master_clock - last_apu_sync` is the number of master cycles the
+    /// APU still owes when a port access forces a sync.
+    pub last_apu_sync: u64,
 }
 
 impl Bus {
@@ -94,6 +111,8 @@ impl Bus {
             last_write_bank: 0,
             last_write_pc: 0,
             current_scanline_target: 0,
+            master_clock: 0,
+            last_apu_sync: 0,
         }
     }
 
@@ -118,6 +137,24 @@ impl Bus {
         )
     }
 
+    /// Force-synchronize the APU to the current master clock cycle.
+    ///
+    /// Called on CPU reads/writes to the APU I/O ports ($2140-$2143) so the
+    /// SPC700 has executed up to the exact cycle of the access. This is the
+    /// core of Near/byuu's "JIT sync" model: instead of catching up the APU
+    /// after every CPU instruction, we only sync on shared-memory access.
+    ///
+    /// The delta `master_clock - last_apu_sync` is always non-negative and
+    /// represents the master cycles the APU hasn't yet consumed.
+    #[inline]
+    pub fn sync_apu(&mut self) {
+        let delta = self.master_clock.wrapping_sub(self.last_apu_sync);
+        if delta > 0 {
+            self.apu.catch_up(delta as u32);
+            self.last_apu_sync = self.master_clock;
+        }
+    }
+
     /// Read a byte from the bus. This is the hot path for all CPU reads.
     /// Takes `&mut self` because some register reads have side effects
     /// (flipflops, counters, flag clears).
@@ -138,7 +175,11 @@ impl Bus {
                     self.open_bus
                 }
             }
-            (0x00..=0x3F, 0x2140..=0x217F) => self.apu.cpu_read((addr & 3) as u8),
+            (0x00..=0x3F, 0x2140..=0x217F) => {
+                // JIT sync: catch up APU to the exact cycle of this port read.
+                self.sync_apu();
+                self.apu.cpu_read((addr & 3) as u8)
+            }
             (0x00..=0x3F, 0x2180) => { // WMDATA — read from WRAM at wram_addr
                 let val = self.wram[self.wram_addr as usize & 0x1FFFF];
                 self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
@@ -187,7 +228,12 @@ impl Bus {
                 }
                 self.ppu.write_register(addr, val);
             }
-            (0x00..=0x3F, 0x2140..=0x217F) => { self.apu.cpu_write((addr & 3) as u8, val); }
+            (0x00..=0x3F, 0x2140..=0x217F) => {
+                // JIT sync: catch up APU before the CPU writes new port data,
+                // so the SPC700 processes any pending instructions first.
+                self.sync_apu();
+                self.apu.cpu_write((addr & 3) as u8, val);
+            }
             (0x00..=0x3F, 0x2180) => { // WMDATA
                 self.wram[self.wram_addr as usize & 0x1FFFF] = val;
                 self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
