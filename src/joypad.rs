@@ -77,6 +77,20 @@ impl Joypad {
         bit as u8
     }
 
+    /// Set or clear a button. `button` is a SNES button mask (e.g. BTN_A).
+    pub fn set_button(&mut self, button: u16, pressed: bool) {
+        if pressed {
+            self.current |= button;
+        } else {
+            self.current &= !button;
+        }
+    }
+
+    /// Read the current button state for auto-joypad ($4218/$4219).
+    pub fn read_auto(&self) -> u16 {
+        self.current
+    }
+
     // ── Snapshot / restore ────────────────────────────────────────────
     // Private fields force serialization to live on the Joypad itself.
 

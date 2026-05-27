@@ -8,7 +8,7 @@
 /// **Format**:
 /// ```text
 /// 0..8    magic "SNES01\0\0"
-/// 8       version byte (currently 1)
+/// 8       version byte (currently 2)
 /// 9..     subsystem blobs in order: CPU, Bus, PPU, APU, SRAM
 /// ```
 ///
@@ -30,10 +30,10 @@ use crate::bus::Bus;
 use crate::dma::{Dma, DmaChannel};
 use crate::joypad::Joypad;
 use crate::ppu::{Ppu, BgLayer};
-use crate::spc700::Apu;
-
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
-const VERSION: u8 = 1;
+/// V2: APU field `cycle_debt: i64` replaced with `cycle_target: u64`.
+/// Same byte width, different semantics — old saves must be rejected.
+const VERSION: u8 = 2;
 
 // ─── Writer helpers ─────────────────────────────────────────────────────
 

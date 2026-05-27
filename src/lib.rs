@@ -4,7 +4,6 @@
 /// in Rust; the browser provides the display (Canvas), input (keyboard),
 /// and timing (requestAnimationFrame).
 
-pub mod apu;
 pub mod bus;
 pub mod cpu;
 pub mod dma;
@@ -310,11 +309,7 @@ impl Emulator {
 
     /// Set a button state. `button` is a SNES button mask, `pressed` is the state.
     pub fn set_button(&mut self, button: u16, pressed: bool) {
-        if pressed {
-            self.bus.joypad.current |= button;
-        } else {
-            self.bus.joypad.current &= !button;
-        }
+        self.bus.joypad.set_button(button, pressed);
     }
 
     /// Get the current frame count.
@@ -374,10 +369,9 @@ impl Emulator {
         let ports_from = &apu.bus.ports_from_main;
         let spc_cycles = apu.cycles;
         let sample_buf_len = apu.sample_buffer.len();
-        // Count active DSP voices (env_phase != Off)
+        // Count active DSP voices (KON/KOFF bits)
         let active_voices = (0..8u8).filter(|&i| {
-            // Check KON register and if voice has been keyed
-            apu.bus.dsp.regs[0x4C] & (1 << i) != 0 || apu.bus.dsp.regs[0x7C] & (1 << i) != 0
+            apu.dsp_reg(0x4C) & (1 << i) != 0 || apu.dsp_reg(0x7C) & (1 << i) != 0
         }).count();
 
         format!(
@@ -469,14 +463,12 @@ impl Emulator {
 
     /// Dump DSP voice state for audio debugging.
     pub fn dump_dsp_voices(&self) -> String {
-        self.bus.apu.bus.dsp.dump_voices()
+        self.bus.apu.dump_dsp_voices()
     }
 
     /// Drain DSP debug log entries.
     pub fn drain_dsp_debug(&mut self) -> String {
-        let log = self.bus.apu.bus.dsp.debug_log.join("\n");
-        self.bus.apu.bus.dsp.debug_log.clear();
-        log
+        self.bus.apu.drain_dsp_debug()
     }
 
     /// Enable/disable CPU trace logging.

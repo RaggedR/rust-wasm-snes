@@ -235,10 +235,13 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU for the skipped cycles. Check if the APU wrote to
-        // its output ports during the skip — if so, the CPU would normally
-        // have read those ports between loop iterations (handshake protocol),
-        // and skipping those reads may corrupt the communication. Bail out.
+        // Drive the APU for the skipped cycles. catch_up is chunk-insensitive
+        // (absolute cycle_target, not relative debt) so a single call produces
+        // identical results to many small calls (distributive law holds).
+        //
+        // Check if the APU wrote to its output ports during the skip — if so,
+        // the CPU would normally read those ports between loop iterations
+        // (handshake protocol), and skipping those reads may corrupt comms.
         bus.apu.bus.ports_written_during_run = false;
         bus.apu.catch_up(skip as u32);
         self.cycles += skip;
@@ -318,11 +321,10 @@ impl Cpu {
 
         // Idle-loop fast path (T10). Gated behind the `idle-skip` Cargo
         // feature — off by default. CPU semantics are correct under this
-        // path (framebuffer hash preserved), but the audio hash exhibits a
-        // residual divergence from APU chunk-size sensitivity (the
-        // SPC700's cycle_debt accounting is not perfectly chunk-equivalent).
-        // See `docs/T10_IDLE_LOOP_DETECTION.md` for the design and the
-        // follow-up section in the PR for the empirical divergence data.
+        // path (framebuffer hash preserved). The APU's absolute cycle target
+        // makes catch_up chunk-insensitive (distributive law holds), but
+        // audio still diverges under idle-skip due to stale APU port state
+        // during the bulk skip. See `docs/T10_IDLE_LOOP_DETECTION.md` §9.2.
         #[cfg(feature = "idle-skip")]
         if let Some(skip) = self.try_idle_skip(bus) {
             return skip;

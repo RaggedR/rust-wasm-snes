@@ -293,8 +293,8 @@ impl Bus {
             0x4215 => (self.rddiv >> 8) as u8,    // RDDIVH
             0x4216 => self.rdmpy as u8,           // RDMPYL
             0x4217 => (self.rdmpy >> 8) as u8,    // RDMPYH
-            0x4218 => self.joypad.current as u8,   // JOY1L
-            0x4219 => (self.joypad.current >> 8) as u8, // JOY1H
+            0x4218 => self.joypad.read_auto() as u8,   // JOY1L
+            0x4219 => (self.joypad.read_auto() >> 8) as u8, // JOY1H
             0x421A..=0x421F => 0, // JOY2-4 (unused)
             _ => self.open_bus,
         }
@@ -403,25 +403,16 @@ impl Bus {
                 let a_addr = self.dma.channels[ch_idx as usize].src_addr;
 
                 if direction {
-                    // B → A: read from PPU registers, write to WRAM/ROM
-                    let val = self.read(0x00, b_addr); // B-bus is bank 0
+                    // B → A: read from B-bus, write to A-bus
+                    let val = self.read(0x00, b_addr);
                     self.write(a_bank, a_addr, val);
                 } else {
-                    // A → B: read from ROM/WRAM, write to PPU registers
+                    // A → B: read from A-bus, write to B-bus
+                    // Route through self.write() so DMA and CPU writes
+                    // take the same code path (container morphism factors
+                    // through the Bus: T_DMA → T_BUS → T_PPU).
                     let val = self.read(a_bank, a_addr);
-                    // B-bus write goes directly to the target register
-                    match b_addr {
-                        0x2100..=0x213F => self.ppu.write_register(b_addr, val),
-                        0x2140..=0x217F => {
-                            self.sync_apu();
-                            self.apu.cpu_write((b_addr & 3) as u8, val);
-                        }
-                        0x2180 => {
-                            self.wram[self.wram_addr as usize & 0x1FFFF] = val;
-                            self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
-                        }
-                        _ => {}
-                    }
+                    self.write(0x00, b_addr, val);
                 }
 
                 if !fixed_a {
@@ -580,19 +571,9 @@ impl Bus {
                 v
             };
 
-            // Write to B-bus register — sync APU before port writes
-            match b_addr {
-                0x2100..=0x213F => self.ppu.write_register(b_addr, val),
-                0x2140..=0x217F => {
-                    self.sync_apu();
-                    self.apu.cpu_write((b_addr & 3) as u8, val);
-                }
-                0x2180 => {
-                    self.wram[self.wram_addr as usize & 0x1FFFF] = val;
-                    self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
-                }
-                _ => {}
-            }
+            // Write to B-bus register — route through self.write() so
+            // HDMA and CPU writes take the same code path.
+            self.write(0x00, b_addr, val);
         }
     }
 }
