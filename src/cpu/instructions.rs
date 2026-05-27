@@ -1194,13 +1194,19 @@ fn adc8(cpu: &mut Cpu, val: u8) {
     cpu.p.v = (!(a ^ val) & (a ^ result as u8)) & 0x80 != 0;
 
     if cpu.p.d {
-        // BCD adjustment: correct each nibble if it exceeds 9.
+        // BCD adjustment: accumulate-and-compare method (blargg's variant).
+        // Each nibble is added cumulatively into `bcd`, with correction (+6)
+        // applied when the running sum exceeds the BCD threshold. The
+        // thresholds (0x9F, not 0x99) account for the carry from the
+        // low-nibble correction already being folded into the accumulator.
         let mut bcd = (a & 0x0F) as u16 + (val & 0x0F) as u16 + carry as u16;
         if bcd > 9 { bcd += 6; }
         bcd += (a & 0xF0) as u16 + (val & 0xF0) as u16;
         if bcd > 0x9F { bcd += 0x60; }
+        // Carry from BCD-adjusted result. Safe to truncate with `as u8`
+        // below because the carry absorbs the high byte.
         cpu.p.c = bcd > 0xFF;
-        let result8 = bcd as u8;
+        let result8 = bcd as u8; // safe: carry already absorbed high byte
         cpu.a = (cpu.a & 0xFF00) | result8 as u16;
         cpu.update_nz8(result8);
     } else {
@@ -1246,7 +1252,12 @@ fn adc_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
 fn sbc8(cpu: &mut Cpu, val: u8) {
     if cpu.p.d {
         // BCD subtraction for 8-bit.
-        // Carry and V flags use the binary result (V is undefined in decimal mode).
+        // IMPORTANT: carry comes from the BINARY complement result, not the
+        // BCD-adjusted result. This is intentionally asymmetric with ADC
+        // (where carry comes from BCD). Per WDC 65816 reference: SBC decimal
+        // carry = binary complement carry, because whether a borrow occurred
+        // is determined by magnitude comparison (binary), not digit structure.
+        // V flag is undefined in decimal mode; we leave it from the binary result.
         let a = cpu.a as u8;
         let not_val = !val;
         let carry_in = cpu.p.c as u8;
@@ -1488,5 +1499,90 @@ fn dec_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
         bus.write(a.bank, a.addr, val as u8);
         bus.write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
         cpu.update_nz16(val);
+    }
+}
+
+#[cfg(test)]
+mod bcd_tests {
+    use super::*;
+    use crate::cpu::Cpu;
+
+    fn cpu_with_decimal(a: u8, carry: bool) -> Cpu {
+        let mut cpu = Cpu::new();
+        cpu.a = a as u16;
+        cpu.p.d = true;
+        cpu.p.c = carry;
+        cpu
+    }
+
+    // --- ADC8 BCD (WDC 65816 reference cases) ---
+
+    #[test]
+    fn adc8_bcd_09_plus_01() {
+        let mut cpu = cpu_with_decimal(0x09, false);
+        adc8(&mut cpu, 0x01);
+        assert_eq!(cpu.a as u8, 0x10, "09 + 01 = 10 BCD");
+        assert!(!cpu.p.c, "no carry");
+    }
+
+    #[test]
+    fn adc8_bcd_99_plus_01() {
+        let mut cpu = cpu_with_decimal(0x99, false);
+        adc8(&mut cpu, 0x01);
+        assert_eq!(cpu.a as u8, 0x00, "99 + 01 = 00 BCD (overflow)");
+        assert!(cpu.p.c, "carry set");
+    }
+
+    #[test]
+    fn adc8_bcd_49_plus_51() {
+        let mut cpu = cpu_with_decimal(0x49, false);
+        adc8(&mut cpu, 0x51);
+        assert_eq!(cpu.a as u8, 0x00, "49 + 51 = 00 BCD");
+        assert!(cpu.p.c, "carry set");
+    }
+
+    #[test]
+    fn adc8_bcd_15_plus_27() {
+        let mut cpu = cpu_with_decimal(0x15, false);
+        adc8(&mut cpu, 0x27);
+        assert_eq!(cpu.a as u8, 0x42, "15 + 27 = 42 BCD");
+        assert!(!cpu.p.c, "no carry");
+    }
+
+    // --- SBC8 BCD ---
+    // Note: SBC carry is from the BINARY complement, not BCD (intentional
+    // asymmetry with ADC — see comment in sbc8). carry=1 means no borrow.
+
+    #[test]
+    fn sbc8_bcd_20_minus_05() {
+        let mut cpu = cpu_with_decimal(0x20, true);
+        sbc8(&mut cpu, 0x05);
+        assert_eq!(cpu.a as u8, 0x15, "20 - 05 = 15 BCD");
+        assert!(cpu.p.c, "no borrow");
+    }
+
+    #[test]
+    fn sbc8_bcd_00_minus_01() {
+        let mut cpu = cpu_with_decimal(0x00, true);
+        sbc8(&mut cpu, 0x01);
+        assert_eq!(cpu.a as u8, 0x99, "00 - 01 = 99 BCD (borrow)");
+        assert!(!cpu.p.c, "borrow occurred");
+    }
+
+    #[test]
+    fn sbc8_bcd_50_minus_25() {
+        let mut cpu = cpu_with_decimal(0x50, true);
+        sbc8(&mut cpu, 0x25);
+        assert_eq!(cpu.a as u8, 0x25, "50 - 25 = 25 BCD");
+        assert!(cpu.p.c, "no borrow");
+    }
+
+    #[test]
+    fn sbc8_bcd_10_minus_10() {
+        let mut cpu = cpu_with_decimal(0x10, true);
+        sbc8(&mut cpu, 0x10);
+        assert_eq!(cpu.a as u8, 0x00, "10 - 10 = 00 BCD");
+        assert!(cpu.p.c, "no borrow");
+        assert!(cpu.p.z, "zero flag set");
     }
 }
