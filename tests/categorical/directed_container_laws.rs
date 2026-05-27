@@ -478,8 +478,8 @@ fn side_effect_joypad_serial_mutates_position() {
     bus.joypad.write_strobe(1);
     bus.joypad.write_strobe(0); // falling edge latches
 
-    let v1 = bus.read(0x00, 0x4016);
-    let v2 = bus.read(0x00, 0x4016);
+    let _v1 = bus.read(0x00, 0x4016);
+    let _v2 = bus.read(0x00, 0x4016);
     // First bit is B (bit 15, set), second is Y (bit 14, not set)
     // At least the bit index advances, so this is stateful
     // (though both might happen to return same value for different reasons)

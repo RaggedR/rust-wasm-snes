@@ -19,7 +19,7 @@
 
 use zelda_a_link_to_the_past::ppu::color::snes_to_argb;
 use zelda_a_link_to_the_past::cpu::StatusRegister;
-use zelda_a_link_to_the_past::ppu::Ppu;
+
 
 // ═══════════════════════════════════════════════════════════════════
 // snes_to_argb: Functor Laws
