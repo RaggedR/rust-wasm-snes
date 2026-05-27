@@ -13,19 +13,12 @@ AudioWorklet replaces ScriptProcessorNode. SharedArrayBuffer ring buffer
 with Near's DRC formula at 32040 Hz base frequency. Landed with JIT sync,
 19 synchronisation contract tests, and `docs/ASYNC_MODEL.md`.
 
-### T12 — SharedArrayBuffer for framebuffer *(Phase B Step 2)*
-Move framebuffer transfer from per-frame `postMessage` to a SharedArrayBuffer shared between worker and main thread. Builds on PR #7's worker scaffold (merged 2026-05-12).
-
-Plan per `PHASE_B_PLAN.md`:
-- Allocate SAB of size 512×224×4 bytes (NTSC visible framebuffer)
-- Worker writes framebuffer via wasm-memory view into SAB
-- Main thread `rAF` reads SAB and paints to canvas
-- `Atomics.store/load` for the frame-ready signal (worker → main)
-- Prerequisites already in place: `crossOriginIsolated === true` confirmed (2026-05-13 smoke test); `SharedArrayBuffer` and `Atomics` available
-
-- **Depends on:** PR #7 worker scaffold ✓ merged
-- **Acceptance:** bench determinism hashes unchanged (`54b3eed74f9f8432` / `62300ecfc4da23e0`); browser-visible smoother frame pacing under main-thread load
-- **Effort:** 1–2 sessions
+### ~~T12 — SharedArrayBuffer for framebuffer~~ *(DONE — 2026-05-27)*
+Framebuffer transferred via SAB single-slot (4-byte Atomics frame_seq +
+229,376 bytes RGBA). Worker writes one copy from WASM linear memory into
+the SAB; main thread rAF loop reads directly. Eliminates per-frame
+postMessage and the 229 KB allocation+copy that went with it. Fallback
+to postMessage path retained for pre-SAB init window.
 
 ### T10 fix — refactor `Apu::run_cycles` to be chunk-deterministic
 The SPC700 cycle-debt mechanism in `src/spc700/mod.rs:281` (`run_cycles`) is not chunk-equivalent — many small `catch_up` calls and one big call deliver identical total SPC cycles but produce different instruction-boundary interleaving, which shifts DSP sample timing. This blocks default-on T10 idle-loop detection (currently behind `idle-skip` feature flag).

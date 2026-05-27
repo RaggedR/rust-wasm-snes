@@ -69,7 +69,7 @@
     </style>
 </head>
 <body>
-    <h1>SNES — Rust/WASM Emulator <span class="tag">[phase-b: worker]</span></h1>
+    <h1>SNES — Rust/WASM Emulator <span class="tag">[phase-b: SAB]</span></h1>
 
     <div id="drop-zone">
         <p>Drop your <strong>.smc</strong> ROM here</p>
@@ -90,13 +90,12 @@
     <div id="status"></div>
 
     <script type="module">
-        // Phase B — Step 1: emulator runs in a Web Worker; main thread
-        // only paints + handles input + plays audio.
+        // Phase B — Step 2: framebuffer via SharedArrayBuffer.
         //
-        // Audio remains on the main thread via the existing
-        // ScriptProcessor path. It will glitch under main-thread load —
-        // that is expected and gets fixed in Step 3 (AudioWorklet + SAB
-        // ring buffer).
+        // Worker writes pixels into a SAB single-slot, signals via
+        // Atomics. Main thread rAF loop reads from the SAB and paints.
+        // No postMessage for the hot path — one copy total per frame
+        // (WASM linear memory → SAB).
 
         const canvas = document.getElementById('screen');
         const ctx = canvas.getContext('2d');
@@ -155,6 +154,12 @@
         const AUDIO_SAB_BYTES = 8 + AUDIO_RING_SAMPLES * 2;
         const audioRingSAB = new SharedArrayBuffer(AUDIO_SAB_BYTES);
 
+        // Framebuffer SAB: 4-byte frame_seq counter + 256*224*4 RGBA pixels
+        const FB_PIXELS = 256 * 224 * 4;      // 229,376 bytes
+        const fbSAB = new SharedArrayBuffer(4 + FB_PIXELS);
+        const fbSeqU32 = new Uint32Array(fbSAB, 0, 1);
+        const fbPixels = new Uint8ClampedArray(fbSAB, 4, FB_PIXELS);
+
         let audioCtx = null;
         let audioStarted = false;
 
@@ -204,18 +209,30 @@
                 worker.postMessage({ type: 'start' });
                 return;
             }
+            if (msg.type === 'status') {
+                lastFrameCount = msg.frameCount;
+                status.textContent = `Frame ${lastFrameCount} (SAB)`;
+            }
             if (msg.type === 'frame') {
-                // fb is a transferred Uint8Array (256*224*4 bytes RGBA).
+                // Fallback path: postMessage with pixel data (before SAB is wired)
                 imageData.data.set(msg.fb);
                 ctx.putImageData(imageData, 0, 0);
-                // Audio is handled via SAB ring — no postMessage needed.
-
                 lastFrameCount = msg.frameCount;
-                if (msg.seq % 60 === 0) {
-                    status.textContent = `Frame ${lastFrameCount} (worker)`;
-                }
             }
         };
+
+        // ── rAF paint loop — reads framebuffer from SAB ──────
+        let lastPaintedSeq = 0;
+        function paint() {
+            const seq = Atomics.load(fbSeqU32, 0);
+            if (seq !== lastPaintedSeq) {
+                lastPaintedSeq = seq;
+                imageData.data.set(fbPixels);
+                ctx.putImageData(imageData, 0, 0);
+            }
+            requestAnimationFrame(paint);
+        }
+        requestAnimationFrame(paint);
 
         // ── ROM loading ───────────────────────────────────────
         dropZone.addEventListener('click', () => romInput.click());
@@ -268,9 +285,11 @@
             canvas.style.display = 'block';
             canvas.focus();
 
-            // Send the audio ring SAB to the worker before loading the ROM.
-            // The worker writes samples into this ring; the AudioWorklet reads.
+            // Send both SABs to the worker before loading the ROM.
+            // Audio: worker writes samples → AudioWorklet reads.
+            // Video: worker writes pixels → main thread rAF reads.
             worker.postMessage({ type: 'audio-ring', sab: audioRingSAB });
+            worker.postMessage({ type: 'fb-sab', sab: fbSAB });
 
             // ROM bytes are transferred to the worker (zero-copy).
             // We pass a copy to avoid neutering the caller's buffer.

@@ -1,11 +1,11 @@
 // emulator-worker.js — Phase B Step 3
 //
-// Runs the SNES emulator off the main thread. Audio samples are written
-// directly into a SharedArrayBuffer ring that the AudioWorklet processor
-// reads from — no postMessage for audio, zero copies across threads.
+// Runs the SNES emulator off the main thread. Both audio and framebuffer
+// are written directly into SharedArrayBuffers — no postMessage for
+// either hot path, zero copies across threads.
 //
-// Framebuffer is still sent via postMessage (transferable ArrayBuffer).
-// Phase B Step 2 will move that to SAB as well.
+// Audio: SAB ring buffer (worker writes, AudioWorklet reads)
+// Video: SAB single-slot (worker writes, main thread rAF reads)
 //
 // Loaded as an ES-module worker:  new Worker(url, { type: 'module' })
 
@@ -22,6 +22,11 @@ let audioRingI16 = null;     // Int16Array view of sample data
 let audioControlU32 = null;  // Uint32Array view of write_pos / read_pos
 let audioRingCapacity = 0;   // total i16 samples in ring
 let droppedSampleCount = 0;  // samples lost to ring overflow (diagnostic)
+
+// Framebuffer (SharedArrayBuffer — single-slot, not a ring)
+let fbSAB = null;
+let fbSeqU32 = null;   // Uint32Array view of frame_seq counter (offset 0)
+let fbU8 = null;       // Uint8Array view of pixel data (offset 4)
 
 const FRAME_MS = 1000 / 60.0988;
 
@@ -75,22 +80,29 @@ function tick() {
     // Write audio samples to the SAB ring (AudioWorklet reads them)
     writeAudioToRing();
 
-    // Framebuffer: still via postMessage (Step 2 will move to SAB)
+    // Framebuffer → SAB (single-slot, main thread rAF reads)
     const fbLen = emulator.framebuffer_len();
     const fbPtr = emulator.framebuffer_ptr();
     const fbView = new Uint8Array(wasmMemory.buffer, fbPtr, fbLen);
-    const fbCopy = new Uint8Array(fbLen);
-    fbCopy.set(fbView);
 
-    self.postMessage(
-        {
-            type: 'frame',
-            seq: frameSeq,
-            frameCount: emulator.frame_count(),
-            fb: fbCopy,
-        },
-        [fbCopy.buffer]
-    );
+    if (fbSAB) {
+        // One copy: WASM linear memory → SAB. Main thread reads directly.
+        fbU8.set(fbView);
+        Atomics.store(fbSeqU32, 0, frameSeq);
+    } else {
+        // Fallback: postMessage path (before SAB is wired up)
+        const fbCopy = new Uint8Array(fbLen);
+        fbCopy.set(fbView);
+        self.postMessage(
+            { type: 'frame', seq: frameSeq, frameCount: emulator.frame_count(), fb: fbCopy },
+            [fbCopy.buffer]
+        );
+    }
+
+    // Periodic status update (no pixel data — just counters)
+    if (frameSeq % 60 === 0) {
+        self.postMessage({ type: 'status', seq: frameSeq, frameCount: emulator.frame_count() });
+    }
 }
 
 function startLoop() {
@@ -126,6 +138,12 @@ self.onmessage = async (ev) => {
             audioControlU32 = new Uint32Array(audioRingSAB, 0, 2);
             audioRingI16 = new Int16Array(audioRingSAB, 8);
             audioRingCapacity = audioRingI16.length;
+            break;
+        case 'fb-sab':
+            // Main thread sends the SharedArrayBuffer for the framebuffer
+            fbSAB = msg.sab;
+            fbSeqU32 = new Uint32Array(fbSAB, 0, 1);
+            fbU8 = new Uint8Array(fbSAB, 4, 256 * 224 * 4);
             break;
         default:
             break;
