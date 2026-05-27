@@ -21,6 +21,7 @@ let audioRingSAB = null;
 let audioRingI16 = null;     // Int16Array view of sample data
 let audioControlU32 = null;  // Uint32Array view of write_pos / read_pos
 let audioRingCapacity = 0;   // total i16 samples in ring
+let droppedSampleCount = 0;  // samples lost to ring overflow (diagnostic)
 
 const FRAME_MS = 1000 / 60.0988;
 
@@ -50,11 +51,15 @@ function writeAudioToRing() {
     const free = cap - used - 2;
 
     // Write as many samples as we have space for
-    const toWrite = Math.min(sampleCount, free);
+    const toWrite = Math.min(sampleCount, free > 0 ? free : 0);
     let wp = writePos;
     for (let i = 0; i < toWrite; i++) {
         audioRingI16[wp % cap] = wasmView[i];
         wp++;
+    }
+
+    if (toWrite < sampleCount) {
+        droppedSampleCount += sampleCount - toWrite;
     }
 
     Atomics.store(audioControlU32, 0, wp % cap);

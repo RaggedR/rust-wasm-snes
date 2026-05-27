@@ -288,7 +288,8 @@
             canvas.style.display = 'none';
             dropZone.style.display = '';
             status.textContent = '';
-            ringWrite = 0; ringRead = 0;
+            // ringWrite/ringRead were removed with ScriptProcessorNode.
+            // Audio ring is now managed by the worker + AudioWorklet via SAB.
         }
         document.getElementById('back-btn').addEventListener('click', stopEmulator);
 
