@@ -195,10 +195,16 @@ impl Bus {
     pub fn cpu_cycle_speed(&self, bank: u8, addr: u16) -> u64 {
         let eb = bank & 0x7F;
         if addr >= 0x8000 || (eb >= 0x40 && eb <= 0x7D) {
-            // ROM / full-bank area
-            if bank >= 0x80 && self.memsel & 0x01 != 0 { 6 } else { 8 }
+            // ROM / full-bank area.  FastROM only applies to the upper half
+            // ($8000+) of high banks — SRAM mirrors at $F0-$FD:$0000-$7FFF
+            // are always slow even when MEMSEL=1.
+            if addr >= 0x8000 && bank >= 0x80 && self.memsel & 0x01 != 0 {
+                6 // FastROM
+            } else {
+                8 // SlowROM or SRAM
+            }
         } else if eb <= 0x3F {
-            // System area
+            // System area ($00-$3F / $80-$BF, addr < $8000)
             match addr {
                 0x4000..=0x41FF => 12, // XSlow (old-style joypad)
                 0x4200..=0x5FFF => 6,  // Fast (CPU I/O, DMA)
