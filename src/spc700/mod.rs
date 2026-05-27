@@ -49,6 +49,11 @@ pub struct ApuBus {
     pub ports_to_main: [u8; 4],
     /// Whether IPL ROM is mapped at $FFC0-$FFFF.
     pub rom_enabled: bool,
+    /// Set during `run_cycles` when the SPC700 writes to $F4-$F7 (output
+    /// ports). Used by idle-skip (T10) to detect APU port activity: if the
+    /// APU writes a port during a bulk catch_up, the idle-skip should bail
+    /// because the CPU would normally read that port between iterations.
+    pub ports_written_during_run: bool,
 }
 
 impl ApuBus {
@@ -60,6 +65,7 @@ impl ApuBus {
             ports_from_main: [0; 4],
             ports_to_main: [0xAA, 0xBB, 0, 0],
             rom_enabled: true,
+            ports_written_during_run: false,
         }
     }
 
@@ -106,6 +112,7 @@ impl ApuBus {
             0x00F3 => self.dsp.write(self.dsp.addr_reg, val),
             0x00F4..=0x00F7 => {
                 self.ports_to_main[(addr - 0xF4) as usize] = val;
+                self.ports_written_during_run = true;
             }
             0x00FA => self.timers[0].target = if val == 0 { 256 } else { val as u16 },
             0x00FB => self.timers[1].target = if val == 0 { 256 } else { val as u16 },

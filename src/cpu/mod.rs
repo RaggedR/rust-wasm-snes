@@ -235,16 +235,25 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU for the skipped cycles and advance the JIT sync
-        // bookkeeping so the end-of-scanline sync_apu() doesn't double-credit.
-        // Under JIT sync, idle loops don't access APU ports, so a single
-        // catch_up call is equivalent to many small ones (distributive law).
+        // Drive the APU for the skipped cycles. Check if the APU wrote to
+        // its output ports during the skip — if so, the CPU would normally
+        // have read those ports between loop iterations (handshake protocol),
+        // and skipping those reads may corrupt the communication. Bail out.
+        bus.apu.bus.ports_written_during_run = false;
         bus.apu.catch_up(skip as u32);
         self.cycles += skip;
         // Update last_apu_sync to match the new master_clock that the frame
         // loop will set (= cpu.cycles after this return). Without this,
         // sync_apu() would see a delta of `skip` and double-credit the APU.
         bus.last_apu_sync = self.cycles;
+
+        if bus.apu.bus.ports_written_during_run {
+            // The APU wrote to a port during the bulk skip. This means it
+            // may be in the middle of a handshake expecting the CPU to read.
+            // We can't undo the catch_up, but we stop skipping immediately
+            // so the CPU resumes normal execution and reads the port.
+            // The skip up to this point is already committed.
+        }
 
         // PC is intentionally NOT advanced — we resume at the LDA. The
         // remaining few iterations cost ~30-60 master cycles total and

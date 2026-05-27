@@ -139,68 +139,61 @@
         let workerReady = false;
         let lastFrameCount = 0n;
 
-        // ── Audio (still on main thread for Phase B Step 1) ───
-        const RING_SIZE = 65536;
-        const AUDIO_GAIN = 4;
-        const ringL = new Float32Array(RING_SIZE);
-        const ringR = new Float32Array(RING_SIZE);
-        let ringWrite = 0;
-        let ringRead = 0;
+        // ── Audio: AudioWorklet + SharedArrayBuffer + DRC (Phase B Step 3) ───
+        //
+        // The audio pipeline is fully decoupled from the main thread:
+        //   Worker produces i16 samples → writes to SAB ring
+        //   AudioWorklet processor reads from SAB ring → outputs float to speakers
+        //
+        // Dynamic Rate Control (Near/byuu) keeps the buffer ~50% full by
+        // microscopically adjusting the resampling ratio (±0.5% pitch, inaudible).
+        // Base frequency is 32040 Hz (real SNES APU oscillator, not 32000 Hz).
+
+        // Ring buffer: 8 bytes control (write_pos, read_pos) + 16384 i16 samples
+        // = ~256ms at 32kHz stereo = comfortable DRC margin
+        const AUDIO_RING_SAMPLES = 16384; // i16 samples (8192 stereo frames)
+        const AUDIO_SAB_BYTES = 8 + AUDIO_RING_SAMPLES * 2;
+        const audioRingSAB = new SharedArrayBuffer(AUDIO_SAB_BYTES);
+
         let audioCtx = null;
         let audioStarted = false;
 
-        function initAudio() {
+        async function initAudio() {
             try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-                    sampleRate: 32000
+                audioCtx = new AudioContext({ sampleRate: 48000 });
+
+                // Load the AudioWorklet processor module
+                await audioCtx.audioWorklet.addModule('audio-worklet-processor.js');
+
+                // Create the worklet node and connect to speakers
+                const workletNode = new AudioWorkletNode(audioCtx, 'snes-audio-processor', {
+                    outputChannelCount: [2],
                 });
-                const processor = audioCtx.createScriptProcessor(1024, 0, 2);
-                processor.onaudioprocess = (e) => {
-                    const left = e.outputBuffer.getChannelData(0);
-                    const right = e.outputBuffer.getChannelData(1);
-                    for (let i = 0; i < left.length; i++) {
-                        if (ringRead !== ringWrite) {
-                            left[i] = ringL[ringRead & (RING_SIZE - 1)];
-                            right[i] = ringR[ringRead & (RING_SIZE - 1)];
-                            ringRead++;
-                        } else {
-                            left[i] = 0;
-                            right[i] = 0;
-                        }
-                    }
-                };
-                processor.connect(audioCtx.destination);
+                workletNode.connect(audioCtx.destination);
+
+                // Send the SAB to the worklet processor
+                workletNode.port.postMessage({ type: 'init', sab: audioRingSAB });
+
                 audioStarted = true;
-                console.log('Audio: 32kHz stereo (suspended until gesture)');
+                console.log('Audio: AudioWorklet + DRC (32040 Hz → 48000 Hz, SAB ring)');
             } catch (err) {
-                console.warn('Audio init failed:', err);
+                console.warn('AudioWorklet init failed, falling back to silence:', err);
             }
 
+            // Resume AudioContext on user gesture (browser autoplay policy)
             const resume = () => {
                 if (audioCtx && audioCtx.state === 'suspended') {
                     audioCtx.resume();
-                    ringRead = ringWrite; // flush stale
+                    // Reset ring pointers to flush stale data
+                    const ctrl = new Uint32Array(audioRingSAB, 0, 2);
+                    Atomics.store(ctrl, 0, 0); // write_pos
+                    Atomics.store(ctrl, 1, 0); // read_pos
                 }
                 document.removeEventListener('keydown', resume);
                 document.removeEventListener('click', resume);
             };
             document.addEventListener('keydown', resume);
             document.addEventListener('click', resume);
-        }
-
-        function pushAudioSamples(samples) {
-            if (!audioStarted || samples.length < 2) return;
-            const stereo = samples.length >> 1;
-            for (let i = 0; i < stereo; i++) {
-                const idx = ringWrite & (RING_SIZE - 1);
-                ringL[idx] = Math.max(-1, Math.min(1, samples[i*2]   / 32768 * AUDIO_GAIN));
-                ringR[idx] = Math.max(-1, Math.min(1, samples[i*2+1] / 32768 * AUDIO_GAIN));
-                ringWrite++;
-            }
-            // Cap to prevent drift.
-            const MAX_BUFFERED = 4096;
-            const buffered = (ringWrite - ringRead) >>> 0;
-            if (buffered > MAX_BUFFERED) ringRead = ringWrite - MAX_BUFFERED;
         }
 
         // ── Worker message handling ───────────────────────────
@@ -215,7 +208,7 @@
                 // fb is a transferred Uint8Array (256*224*4 bytes RGBA).
                 imageData.data.set(msg.fb);
                 ctx.putImageData(imageData, 0, 0);
-                pushAudioSamples(msg.audio);
+                // Audio is handled via SAB ring — no postMessage needed.
 
                 lastFrameCount = msg.frameCount;
                 if (msg.seq % 60 === 0) {
@@ -266,7 +259,7 @@
         })();
 
         async function startEmulator(romData, romName) {
-            initAudio();
+            await initAudio();
 
             const title = (romName || 'Unknown').replace(/\.(smc|sfc)$/i, '');
             document.title = `SNES — ${title} [phase-b]`;
@@ -274,6 +267,10 @@
             dropZone.style.display = 'none';
             canvas.style.display = 'block';
             canvas.focus();
+
+            // Send the audio ring SAB to the worker before loading the ROM.
+            // The worker writes samples into this ring; the AudioWorklet reads.
+            worker.postMessage({ type: 'audio-ring', sab: audioRingSAB });
 
             // ROM bytes are transferred to the worker (zero-copy).
             // We pass a copy to avoid neutering the caller's buffer.
