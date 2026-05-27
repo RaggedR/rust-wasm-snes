@@ -77,7 +77,7 @@ function tick() {
     if (!emulator) return;
 
     emulator.run_frame_no_return();
-    frameSeq++;
+    frameSeq = (frameSeq + 1) >>> 0;  // keep in Uint32 range to match SAB view
 
     // Write audio samples to the SAB ring (AudioWorklet reads them)
     writeAudioToRing();
@@ -96,7 +96,10 @@ function tick() {
         fbU8.set(fbView);
         Atomics.store(fbSeqU32, 0, frameSeq);
     } else {
-        // Fallback: postMessage path (before SAB is wired up)
+        // Fallback: postMessage path (before SAB is wired up).
+        // In normal init, fb-sab arrives before the first tick(), so this
+        // path is unreachable. If it fires, something broke the send order.
+        console.warn('framebuffer SAB not wired — falling back to postMessage');
         const fbCopy = new Uint8Array(fbLen);
         fbCopy.set(fbView);
         self.postMessage(
