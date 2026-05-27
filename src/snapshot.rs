@@ -83,6 +83,12 @@ pub(crate) fn r_bytes_into(r: &mut &[u8], dst: &mut [u8]) -> Result<(), String> 
 }
 pub(crate) fn r_bytes_vec(r: &mut &[u8]) -> Result<Vec<u8>, String> {
     let n = r_u32(r)? as usize;
+    // Guard against crafted snapshots that claim enormous blob sizes.
+    // Largest legitimate blob is ~256 KB (PPU framebuffer). 64 MB is a
+    // conservative ceiling that catches malformed input before OOM.
+    if n > 64 * 1024 * 1024 {
+        return Err(format!("snapshot: blob size {} exceeds 64 MB limit", n));
+    }
     if r.len() < n { return Err("snapshot: unexpected EOF (bytes_vec)".into()); }
     let v = r[..n].to_vec();
     *r = &r[n..];

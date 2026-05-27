@@ -16,6 +16,10 @@ pub struct Bus {
     pub ppu: Ppu,
     pub apu: Apu,
     pub dma: Dma,
+    /// Guard flag: true while DMA execution functions hold the extracted
+    /// Dma via std::mem::take. debug_assert prevents reads/writes to
+    /// $4300-$437F from hitting the zeroed placeholder.
+    dma_active: bool,
     pub joypad: Joypad,
 
     // ── CPU internal registers ────────────────────────────
@@ -124,6 +128,7 @@ impl Bus {
             ppu: Ppu::new(),
             apu: Apu::new(),
             dma: Dma::new(),
+            dma_active: false,
             joypad: Joypad::new(),
 
             nmitimen: 0,
@@ -322,7 +327,12 @@ impl Bus {
             // multitap or second controller treat 0 as "absent."
             (0x00..=0x3F, 0x4017) => 0,
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
-            (0x00..=0x3F, 0x4300..=0x437F) => self.dma.read(addr),
+            (0x00..=0x3F, 0x4300..=0x437F) => {
+                debug_assert!(!self.dma_active,
+                    "DMA register read ${:04X} while DMA is executing — \
+                     bus.dma is temporarily extracted via std::mem::take", addr);
+                self.dma.read(addr)
+            }
             // HiROM SRAM: banks $20-$3F, $6000-$7FFF.
             // Real hardware mirrors the SRAM across all banks — the bank
             // bits above the SRAM size are not decoded by the chip.
@@ -412,7 +422,12 @@ impl Bus {
             }
             (0x00..=0x3F, 0x4016) => { self.joypad.write_strobe(val); }
             (0x00..=0x3F, 0x4200..=0x42FF) => { self.write_cpu_register(addr, val); }
-            (0x00..=0x3F, 0x4300..=0x437F) => { self.dma.write(addr, val); }
+            (0x00..=0x3F, 0x4300..=0x437F) => {
+                debug_assert!(!self.dma_active,
+                    "DMA register write ${:04X} while DMA is executing — \
+                     bus.dma is temporarily extracted via std::mem::take", addr);
+                self.dma.write(addr, val);
+            }
             // HiROM SRAM: banks $20-$3F, $6000-$7FFF (mirrored).
             (0x20..=0x3F, 0x6000..=0x7FFF) if self.cart.map_mode == MapMode::HiROM => {
                 let sram_len = self.cart.sram.len();
@@ -515,7 +530,9 @@ impl Bus {
                 eprintln!("  $420B write val={:02X} from PC={:02X}:{:04X} wram[0]={:02X}",
                     val, self.last_write_bank, self.last_write_pc, self.wram[0]);
                 let mut dma = std::mem::take(&mut self.dma);
+                self.dma_active = true;
                 crate::dma::execute_general_dma(&mut dma, self, val);
+                self.dma_active = false;
                 self.dma = dma;
             }
             0x420C => {
@@ -544,14 +561,18 @@ impl Bus {
     /// Wrapper for HDMA init — extracts dma, calls dma::hdma_init_frame, restores.
     pub fn hdma_init_frame(&mut self) {
         let mut dma = std::mem::take(&mut self.dma);
+        self.dma_active = true;
         crate::dma::hdma_init_frame(&mut dma, self);
+        self.dma_active = false;
         self.dma = dma;
     }
 
     /// Wrapper for HDMA scanline — extracts dma, calls dma::hdma_run_scanline, restores.
     pub fn hdma_run_scanline(&mut self) {
         let mut dma = std::mem::take(&mut self.dma);
+        self.dma_active = true;
         crate::dma::hdma_run_scanline(&mut dma, self);
+        self.dma_active = false;
         self.dma = dma;
     }
 }
