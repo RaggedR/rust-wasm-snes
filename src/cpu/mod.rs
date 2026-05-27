@@ -169,26 +169,11 @@ impl Cpu {
     /// Cargo feature, default off, until audio determinism is resolved.
     #[cfg(feature = "idle-skip")]
     fn try_idle_skip(&mut self, bus: &mut Bus) -> Option<u64> {
-        // Master-cycle headroom we leave before the scanline boundary. An
-        // LDA dp + BEQ taken pair costs about 36 master cycles in 8-bit
-        // mode (3 CPU cycles each × 6 master/CPU); we want enough headroom
-        // that two full iterations can complete before the inner while
-        // loop exits, so the per-scanline overshoot pattern stays close to
-        // what the unskipped path produces.
-        const SAFETY_MARGIN: u64 = 80;
-        const MIN_SKIP: u64 = 150;
-        // Master cycles per CPU step we simulate during the skip. Matches the
-        // dominant per-step elapsed in the unskipped path: LDA dp and BEQ taken
-        // are each 3 CPU cycles × 6 master = 18. Crucial for audio determinism:
-        // the SPC700 runs in chunked cycle-debt mode and is sensitive to the
-        // chunk size delivered to `apu.catch_up`. Empirically, calling
-        // catch_up(18) N times during a skip does NOT exactly reproduce the
-        // unskipped audio hash — there is a residual divergence the
-        // design doc flagged as "the most likely failure mode" (§6 risk 1).
-        // Resolving that is a multi-session task; this implementation lives
-        // behind the `idle-skip` Cargo feature, default off, so the
-        // determinism contract stays green on `main`.
-        const SIMULATED_STEP_CYCLES: u32 = 18;
+        // Master-cycle headroom before the scanline boundary. Two full
+        // polling iterations (~46 × 2 = 92 master cycles with variable
+        // bus speed) ensures the tail iterations' overshoot pattern stays
+        // close to what the unskipped path produces.
+        const SAFETY_MARGIN: u64 = 100;
 
         // Tier 1 requires 8-bit accumulator mode (M=1). SMW polls in M=1.
         // 16-bit polls are a Tier 2 follow-up.
@@ -226,11 +211,6 @@ impl Cpu {
         if budget <= SAFETY_MARGIN {
             return None;
         }
-        let skip = budget - SAFETY_MARGIN;
-        if skip < MIN_SKIP {
-            return None;
-        }
-
         // Project the post-skip A and N/Z flags. After the skip, the next
         // real LDA iteration would read whatever the polled byte holds
         // right now (since pure-memory means nothing has mutated it during
@@ -241,33 +221,32 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU for the skipped cycles. catch_up is distributive
-        // (absolute master_cycles_total target) so a single bulk call
-        // produces the same SPC cycle count as many small calls delivering
-        // the same total.
+        // Compute the exact cost of one polling iteration matching the
+        // instruction decoder's cycle accounting:
         //
-        // Check if the APU wrote to its output ports during the skip — if so,
-        // the CPU would normally read those ports between loop iterations
-        // (handshake protocol), and skipping those reads may corrupt comms.
-        bus.apu.bus.take_ports_written(); // clear before catch_up
-        bus.apu.catch_up(skip as u32);
-        self.cycles += skip;
-        // Update last_apu_sync to match the new master_clock that the frame
-        // loop will set (= cpu.cycles after this return). Without this,
-        // sync_apu() would see a delta of `skip` and double-credit the APU.
-        bus.last_apu_sync = self.cycles;
+        // LDA dp ($A5): base_cycles=3, bus accesses=3 (opcode + operand + data),
+        //   internal = 3 - 3 = 0. Master = 3 × bus_speed.
+        //
+        // BEQ taken ($F0): base_cycles+1=3, bus accesses=2 (opcode + offset),
+        //   internal = 3 - 2 = 1. Master = 2 × bus_speed + 1 × 6.
+        //
+        // All bus reads for the opcode/operand stream are at PBR:PC (ROM speed).
+        // The data read for LDA dp is at bank $00 (WRAM speed).
+        let opcode_speed = bus.cpu_cycle_speed(self.pbr, pc) as u64;
+        let data_speed = bus.cpu_cycle_speed(0x00, polled_addr) as u64;
+        // LDA dp: 2 × opcode_speed (fetch opcode + operand) + 1 × data_speed
+        let lda_master = 2 * opcode_speed + data_speed;
+        // BEQ taken: 2 × opcode_speed (fetch opcode + offset) + 1 × 6 (internal)
+        let beq_master = 2 * opcode_speed + 6;
+        let iter_cost = lda_master + beq_master;
 
-        if bus.apu.bus.take_ports_written() {
-            // The APU wrote to a port during the bulk skip. This means it
-            // may be in the middle of a handshake expecting the CPU to read.
-            // We can't undo the catch_up, but we stop skipping immediately
-            // so the CPU resumes normal execution and reads the port.
-            self.idle_skip_aborted += 1;
-            // Don't count aborted skips in idle_skip_cycles — those cycles
-            // were spent on APU catch_up but the CPU didn't actually save
-            // any work (it resumes immediately).
-            return Some(0);
+        // Skip whole iterations, preserving exact cycle alignment.
+        let iterations = (budget - SAFETY_MARGIN) / iter_cost;
+        if iterations == 0 {
+            return None;
         }
+        let skip = iterations * iter_cost;
+        self.cycles += skip;
 
         // PC is intentionally NOT advanced — we resume at the LDA. The
         // remaining few iterations cost ~30-60 master cycles total and

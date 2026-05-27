@@ -535,6 +535,7 @@ impl Apu {
         (self.master_cycles_total % 21) as u32
     }
 
+
     /// Drain the audio sample buffer, returning all accumulated samples.
     pub fn drain_samples(&mut self) -> Vec<i16> {
         std::mem::take(&mut self.sample_buffer)
