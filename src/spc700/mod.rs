@@ -246,9 +246,9 @@ impl OutputFilter {
         for (c, s) in self.ch.iter_mut().zip(samples) {
             let input = *s as i32;
 
-            // Low-pass filter (two-point FIR: 0.25 * prev + 0.75 * current)
+            // Low-pass IIR (blargg's SPC_Filter: p1 feeds back)
             let f = input + c.p1;
-            c.p1 = input * 3;
+            c.p1 = input - f + input + input; // = 2*input - p1_old
 
             // High-pass filter ("leaky integrator")
             let delta = f - c.pp1;

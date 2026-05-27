@@ -39,8 +39,12 @@ class SNESAudioProcessor extends AudioWorkletProcessor {
         this.dstRate = sampleRate; // AudioContext.sampleRate (usually 48000)
         this.resamplePos = 0;    // fractional position in source stream
 
-        // Audio gain (matches Phase A: ×4)
-        this.gain = 4.0;
+        // Last sample held for underrun (avoids silence pops)
+        this.lastL = 0;
+        this.lastR = 0;
+
+        // Audio gain
+        this.gain = 2.0;
 
         // DRC parameters (Near's formula)
         this.maxDelta = 0.005;   // 0.5% max pitch distortion
@@ -105,12 +109,14 @@ class SNESAudioProcessor extends AudioWorkletProcessor {
                 const l1 = this.ring[idx1]     / 32768.0;
                 const r1 = this.ring[idx1 + 1] / 32768.0;
 
-                outL[i] = Math.max(-1, Math.min(1, (l0 + frac * (l1 - l0)) * this.gain));
-                outR[i] = Math.max(-1, Math.min(1, (r0 + frac * (r1 - r0)) * this.gain));
+                this.lastL = Math.max(-1, Math.min(1, (l0 + frac * (l1 - l0)) * this.gain));
+                this.lastR = Math.max(-1, Math.min(1, (r0 + frac * (r1 - r0)) * this.gain));
+                outL[i] = this.lastL;
+                outR[i] = this.lastR;
             } else {
-                // Underrun: output silence
-                outL[i] = 0;
-                outR[i] = 0;
+                // Underrun: hold last sample (silence causes pops)
+                outL[i] = this.lastL;
+                outR[i] = this.lastR;
             }
 
             this.resamplePos += ratio;
