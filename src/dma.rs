@@ -2,6 +2,14 @@
 ///
 /// General DMA halts the CPU and bulk-transfers data between the A-bus
 /// (ROM/WRAM) and B-bus (PPU/APU registers at $2100-$21FF).
+///
+/// Execution functions (general DMA + HDMA) take `(dma, bus)` as split
+/// borrows: the caller extracts `dma` from `bus` via `std::mem::take`
+/// before calling, then restores it after. This resolves the borrow-
+/// checker conflict where DMA needs `&mut self.dma` and `&mut Bus`
+/// simultaneously.
+
+use crate::bus::Bus;
 
 #[derive(Clone, Copy, Default)]
 pub struct DmaChannel {
@@ -34,6 +42,10 @@ pub struct DmaChannel {
 
 pub struct Dma {
     pub channels: [DmaChannel; 8],
+}
+
+impl Default for Dma {
+    fn default() -> Self { Self::new() }
 }
 
 impl Dma {
@@ -94,6 +106,219 @@ impl Dma {
             _ => {}
         }
     }
+}
+
+// ── DMA execution functions (split-borrow pattern) ──────────────────
+
+/// Execute general DMA for all enabled channels.
+pub fn execute_general_dma(dma: &mut Dma, bus: &mut Bus, enable_mask: u8) {
+    let mut total_cycles: u64 = 0;
+    let mut dma_cycles_since_sync: u32 = 0;
+
+    for ch_idx in 0..8u8 {
+        if enable_mask & (1 << ch_idx) == 0 { continue; }
+
+        #[cfg(feature = "vram-trace")]
+        {
+            let ch = &dma.channels[ch_idx as usize];
+            let dest = 0x2100u16 + ch.dest as u16;
+            let mode = ch.control & 0x07;
+            let size = if ch.size == 0 { 0x10000u32 } else { ch.size as u32 };
+            let game_mode = bus.wram[0x0100];
+            let fixed = ch.control & 0x08 != 0;
+            let src_val = if ch.src_bank == 0x00 && (ch.src_addr as usize) < bus.wram.len() {
+                bus.wram[ch.src_addr as usize]
+            } else { 0xFF };
+            eprintln!("  DMA ch{} mode={} dest=${:04X} src={:02X}:{:04X} size={} dir={} fixed={} src[0]={:02X} vram={:04X} vmain={:02X} game={:02X} scan={}",
+                ch_idx, mode, dest, ch.src_bank, ch.src_addr, size,
+                if ch.control & 0x80 != 0 { "B→A" } else { "A→B" },
+                fixed, src_val,
+                bus.ppu.vram_addr, bus.ppu.vram_increment, game_mode,
+                bus.ppu.scanline);
+        }
+
+        let mode = (dma.channels[ch_idx as usize].control & 0x07) as usize;
+        let direction = dma.channels[ch_idx as usize].control & 0x80 != 0;
+        let fixed_a = dma.channels[ch_idx as usize].control & 0x08 != 0;
+        let decrement_a = dma.channels[ch_idx as usize].control & 0x10 != 0;
+        let dest_base = 0x2100u16 + dma.channels[ch_idx as usize].dest as u16;
+        let transfer_size = DMA_TRANSFER_SIZES[mode];
+        let pattern = DMA_TRANSFER_PATTERNS[mode];
+
+        let mut remaining = if dma.channels[ch_idx as usize].size == 0 {
+            0x10000u32
+        } else {
+            dma.channels[ch_idx as usize].size as u32
+        };
+        let mut unit_idx: u8 = 0;
+
+        while remaining > 0 {
+            let b_addr = dest_base + pattern[unit_idx as usize] as u16;
+            let a_bank = dma.channels[ch_idx as usize].src_bank;
+            let a_addr = dma.channels[ch_idx as usize].src_addr;
+
+            if direction {
+                let val = bus.read(0x00, b_addr);
+                bus.write(a_bank, a_addr, val);
+            } else {
+                let val = bus.read(a_bank, a_addr);
+                bus.write(0x00, b_addr, val);
+            }
+
+            if !fixed_a {
+                if decrement_a {
+                    dma.channels[ch_idx as usize].src_addr =
+                        dma.channels[ch_idx as usize].src_addr.wrapping_sub(1);
+                } else {
+                    dma.channels[ch_idx as usize].src_addr =
+                        dma.channels[ch_idx as usize].src_addr.wrapping_add(1);
+                }
+            }
+
+            unit_idx = (unit_idx + 1) % transfer_size;
+            remaining -= 1;
+            total_cycles += 8;
+
+            dma_cycles_since_sync += 8;
+            if dma_cycles_since_sync >= 128 {
+                bus.master_clock += dma_cycles_since_sync as u64;
+                bus.sync_apu();
+                dma_cycles_since_sync = 0;
+            }
+        }
+
+        dma.channels[ch_idx as usize].size = 0;
+    }
+
+    if dma_cycles_since_sync > 0 {
+        bus.master_clock += dma_cycles_since_sync as u64;
+        bus.sync_apu();
+    }
+    bus.pending_dma_cycles += total_cycles;
+}
+
+/// Initialize HDMA channels at the start of each frame (scanline 0).
+pub fn hdma_init_frame(dma: &mut Dma, bus: &mut Bus) {
+    if bus.hdmaen == 0 { return; }
+
+    let mut cycles: u64 = 0;
+
+    for ch in 0..8u8 {
+        if bus.hdmaen & (1 << ch) == 0 {
+            dma.channels[ch as usize].hdma_terminated = true;
+            continue;
+        }
+
+        let c = &mut dma.channels[ch as usize];
+        c.hdma_addr = c.src_addr;
+        c.hdma_terminated = false;
+        c.hdma_do_transfer = true;
+        cycles += 8;
+    }
+
+    for ch in 0..8u8 {
+        if bus.hdmaen & (1 << ch) == 0 { continue; }
+        if dma.channels[ch as usize].hdma_terminated { continue; }
+        cycles += hdma_load_entry(dma, bus, ch);
+    }
+
+    bus.pending_dma_cycles += cycles;
+}
+
+/// Load the next HDMA table entry for a channel.
+fn hdma_load_entry(dma: &mut Dma, bus: &mut Bus, ch: u8) -> u64 {
+    let idx = ch as usize;
+    let bank = dma.channels[idx].src_bank;
+    let addr = dma.channels[idx].hdma_addr;
+    let mut cycles: u64 = 0;
+
+    let line_count = bus.read(bank, addr);
+    dma.channels[idx].hdma_addr = addr.wrapping_add(1);
+    cycles += 8;
+
+    if line_count == 0 {
+        dma.channels[idx].hdma_terminated = true;
+        return cycles;
+    }
+
+    dma.channels[idx].hdma_line_counter = line_count;
+    dma.channels[idx].hdma_do_transfer = true;
+
+    let indirect = dma.channels[idx].control & 0x40 != 0;
+    if indirect {
+        let tbl_addr = dma.channels[idx].hdma_addr;
+        let lo = bus.read(bank, tbl_addr) as u16;
+        let hi = bus.read(bank, tbl_addr.wrapping_add(1)) as u16;
+        dma.channels[idx].size = lo | (hi << 8);
+        dma.channels[idx].hdma_addr = tbl_addr.wrapping_add(2);
+        cycles += 16;
+    }
+
+    cycles
+}
+
+/// Execute HDMA transfers for one scanline.
+pub fn hdma_run_scanline(dma: &mut Dma, bus: &mut Bus) {
+    if bus.hdmaen == 0 { return; }
+    bus.sync_apu();
+
+    let mut cycles: u64 = 0;
+
+    for ch in 0..8u8 {
+        if bus.hdmaen & (1 << ch) == 0 { continue; }
+        let idx = ch as usize;
+        if dma.channels[idx].hdma_terminated { continue; }
+
+        cycles += 8;
+
+        if dma.channels[idx].hdma_do_transfer {
+            cycles += hdma_transfer(dma, bus, ch);
+        }
+
+        let counter = dma.channels[idx].hdma_line_counter;
+        let new_count = (counter & 0x80) | ((counter & 0x7F).wrapping_sub(1) & 0x7F);
+        dma.channels[idx].hdma_line_counter = new_count;
+
+        if new_count & 0x7F == 0 {
+            cycles += hdma_load_entry(dma, bus, ch);
+        } else {
+            dma.channels[idx].hdma_do_transfer = counter & 0x80 != 0;
+        }
+    }
+
+    bus.pending_dma_cycles += cycles;
+}
+
+/// Transfer data bytes for one HDMA channel on this scanline.
+fn hdma_transfer(dma: &mut Dma, bus: &mut Bus, ch: u8) -> u64 {
+    let idx = ch as usize;
+    let mode = (dma.channels[idx].control & 0x07) as usize;
+    let indirect = dma.channels[idx].control & 0x40 != 0;
+    let dest_base = 0x2100u16 + dma.channels[idx].dest as u16;
+    let transfer_size = DMA_TRANSFER_SIZES[mode];
+    let pattern = DMA_TRANSFER_PATTERNS[mode];
+
+    for i in 0..transfer_size {
+        let b_addr = dest_base + pattern[i as usize] as u16;
+
+        let val = if indirect {
+            let data_bank = dma.channels[idx].hdma_indirect_bank;
+            let data_addr = dma.channels[idx].size;
+            let v = bus.read(data_bank, data_addr);
+            dma.channels[idx].size = data_addr.wrapping_add(1);
+            v
+        } else {
+            let bank = dma.channels[idx].src_bank;
+            let addr = dma.channels[idx].hdma_addr;
+            let v = bus.read(bank, addr);
+            dma.channels[idx].hdma_addr = addr.wrapping_add(1);
+            v
+        };
+
+        bus.write(0x00, b_addr, val);
+    }
+
+    transfer_size as u64 * 8
 }
 
 /// B-bus register offsets for each transfer unit, by mode.
