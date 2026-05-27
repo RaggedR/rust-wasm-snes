@@ -33,9 +33,7 @@ use crate::ppu::{Ppu, BgLayer};
 use crate::spc700::Apu;
 
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
-/// Snapshot format version. Bumped from 1 to 2 when JIT sync fields
-/// (master_clock, last_apu_sync) were added to Bus.
-const VERSION: u8 = 2;
+const VERSION: u8 = 1;
 
 // ─── Writer helpers ─────────────────────────────────────────────────────
 
@@ -429,8 +427,8 @@ fn write_bus(out: &mut Vec<u8>, bus: &Bus) {
     w_u64(out, bus.pending_dma_cycles);
     w_u8(out, bus.last_write_bank);
     w_u16(out, bus.last_write_pc);
-    w_u64(out, bus.master_clock);
-    w_u64(out, bus.last_apu_sync);
+    // master_clock and last_apu_sync are transient JIT sync state, reset
+    // every scanline — no need to persist across save/restore.
 
     // Sub-components
     write_ppu(out, &bus.ppu);
@@ -477,8 +475,10 @@ fn read_bus(r: &mut &[u8], bus: &mut Bus) -> Result<(), String> {
     bus.pending_dma_cycles = r_u64(r)?;
     bus.last_write_bank = r_u8(r)?;
     bus.last_write_pc = r_u16(r)?;
-    bus.master_clock = r_u64(r)?;
-    bus.last_apu_sync = r_u64(r)?;
+    // master_clock and last_apu_sync are transient — not persisted.
+    // They'll be reset at the next scanline boundary.
+    bus.master_clock = 0;
+    bus.last_apu_sync = 0;
 
     read_ppu(r, &mut bus.ppu)?;
     read_dma(r, &mut bus.dma)?;

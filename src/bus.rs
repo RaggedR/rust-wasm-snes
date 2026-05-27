@@ -148,7 +148,10 @@ impl Bus {
     /// represents the master cycles the APU hasn't yet consumed.
     #[inline]
     pub fn sync_apu(&mut self) {
-        let delta = self.master_clock.wrapping_sub(self.last_apu_sync);
+        debug_assert!(self.master_clock >= self.last_apu_sync,
+            "master_clock {} < last_apu_sync {} — clock inversion",
+            self.master_clock, self.last_apu_sync);
+        let delta = self.master_clock - self.last_apu_sync;
         if delta > 0 {
             self.apu.catch_up(delta as u32);
             self.last_apu_sync = self.master_clock;
@@ -408,7 +411,10 @@ impl Bus {
                     // B-bus write goes directly to the target register
                     match b_addr {
                         0x2100..=0x213F => self.ppu.write_register(b_addr, val),
-                        0x2140..=0x217F => self.apu.cpu_write((b_addr & 3) as u8, val),
+                        0x2140..=0x217F => {
+                            self.sync_apu();
+                            self.apu.cpu_write((b_addr & 3) as u8, val);
+                        }
                         0x2180 => {
                             self.wram[self.wram_addr as usize & 0x1FFFF] = val;
                             self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
@@ -554,10 +560,13 @@ impl Bus {
                 v
             };
 
-            // Write to B-bus register
+            // Write to B-bus register — sync APU before port writes
             match b_addr {
                 0x2100..=0x213F => self.ppu.write_register(b_addr, val),
-                0x2140..=0x217F => self.apu.cpu_write((b_addr & 3) as u8, val),
+                0x2140..=0x217F => {
+                    self.sync_apu();
+                    self.apu.cpu_write((b_addr & 3) as u8, val);
+                }
                 0x2180 => {
                     self.wram[self.wram_addr as usize & 0x1FFFF] = val;
                     self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;

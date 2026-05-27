@@ -144,13 +144,18 @@ scanline boundary.
 
 Under per-instruction sync (Level 0), T10 had to simulate the catch-up chunk
 distribution to avoid audio divergence — and still failed due to the
-non-associativity of `catch_up`. Under JIT sync (Level 1), T10 becomes
-audio-safe: during the skipped span, there are no port accesses, so no
-catch-up calls occur. The end-of-scanline flush delivers all cycles in one
-batch — which is identical to what JIT sync does in the unskipped case.
+non-associativity of `catch_up`. JIT sync (Level 1) improves the situation by
+delivering idle-skip cycles as a single `catch_up` call (since no port accesses
+occur during the skipped span), but **does not fully resolve the audio divergence**.
 
-This means JIT sync unblocks T10 as a side effect: the idle-skip feature
-can be enabled without breaking audio determinism.
+Empirical testing confirms both FB and audio hashes still diverge with
+`idle-skip` enabled. The root cause is deeper than chunking: the APU may be
+in a handshake protocol expecting the CPU to read its ports between iterations.
+During idle-skip, those reads never happen — this is the stale-port problem
+that Near describes as "thousands of instructions ahead." JIT sync fixes the
+chunking dimension but not the communication dimension.
+
+T10 idle-skip remains behind a feature flag (`idle-skip`, default OFF).
 
 ---
 
@@ -198,10 +203,11 @@ The Phase B AudioWorklet should:
 
 ### DRC and JIT Sync Interaction
 
-With JIT sync, T10 idle-skip becomes audio-safe, and DRC handles any residual
-sample rate variation. The buffer fill level self-corrects: if a burst produces
-slightly fewer or more samples, DRC adjusts the resampling ratio to compensate.
-This is exactly the scenario Near designed DRC for.
+DRC handles sample rate variation from JIT sync's non-uniform catch_up timing.
+The buffer fill level self-corrects: if a burst produces slightly fewer or more
+samples, DRC adjusts the resampling ratio to compensate. This is exactly the
+scenario Near designed DRC for. Note: T10 idle-skip audio divergence is NOT
+resolved by JIT sync alone (see §4).
 
 ### Frequency Correction
 

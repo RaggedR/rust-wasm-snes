@@ -235,20 +235,16 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU using the same chunk distribution it would receive
-        // from the unskipped loop: a stream of `SIMULATED_STEP_CYCLES`-sized
-        // catch_ups, with the remainder as the final call. We do this here
-        // and return 0 from step() so the outer frame loop's own catch_up
-        // for `elapsed` is a no-op — otherwise we'd double-credit cycles.
-        let mut remaining = skip;
-        while remaining >= SIMULATED_STEP_CYCLES as u64 {
-            bus.apu.catch_up(SIMULATED_STEP_CYCLES);
-            remaining -= SIMULATED_STEP_CYCLES as u64;
-        }
-        if remaining > 0 {
-            bus.apu.catch_up(remaining as u32);
-        }
+        // Drive the APU for the skipped cycles and advance the JIT sync
+        // bookkeeping so the end-of-scanline sync_apu() doesn't double-credit.
+        // Under JIT sync, idle loops don't access APU ports, so a single
+        // catch_up call is equivalent to many small ones (distributive law).
+        bus.apu.catch_up(skip as u32);
         self.cycles += skip;
+        // Update last_apu_sync to match the new master_clock that the frame
+        // loop will set (= cpu.cycles after this return). Without this,
+        // sync_apu() would see a delta of `skip` and double-credit the APU.
+        bus.last_apu_sync = self.cycles;
 
         // PC is intentionally NOT advanced — we resume at the LDA. The
         // remaining few iterations cost ~30-60 master cycles total and
