@@ -98,7 +98,6 @@ Emulator
 
 **Known inaccuracies:**
 - Fixed x6 master cycle multiplier (ignores fast/slow bus regions)
-- BCD mode (D flag) not implemented in ADC/SBC
 
 ### PPU (`src/ppu/`)
 
@@ -269,14 +268,14 @@ These were identified in the architecture assessment but too large to apply in t
 
 2. **[L] Privatize struct fields** -- Bus, PPU, CPU, DMA all have pervasive `pub` on fields. Snapshot.rs directly accesses ~100 fields. Requires adding accessor methods and updating snapshot serialization. Started with Joypad (accessor methods added); full sweep is multi-session.
 
-3. **[S] BCD mode** -- D flag tracked but not checked in ADC/SBC. Target games (LTTP, SMW) don't use it.
+3. ~~**[S] BCD mode**~~ -- **DONE** (sweep 3). ADC/SBC now handle decimal mode with 8 unit tests.
 
-4. **[M] Variable bus speed** -- Fixed x6 multiplier should be per-region (6/8/12).
+4. **[M] Variable bus speed** -- Fixed x6 multiplier should be per-region (6/8/12). `cpu_cycle_speed()` infrastructure in place but not wired in.
 
 5. **[M] HDMA cycle accounting** -- HDMA transfers consume zero cycles; real hardware charges ~8 per byte + overhead.
 
-6. **[S] Deprecate `run_frame()`** -- Legacy copying path superseded by zero-copy.
+6. ~~**[S] Deprecate `run_frame()`**~~ -- **DONE**. Marked `#[deprecated]`, bench.rs uses zero-copy path.
 
-7. **[S] Fill missing bus ranges** -- WMADDL/M/H reads ($2181-$2183), bank $40-$6F low-area mirroring.
+7. ~~**[S] Fill missing bus ranges**~~ -- **DONE**. WMADDL/M/H reads ($2181-$2183) return stored values, bank $40-$6F low-area mirrors system area (LoROM) or full ROM (HiROM).
 
-8. **[S] Frame loop reaching into PPU** -- `bus.ppu.scanline` set directly from lib.rs; should be a parameter to `render_scanline()`.
+8. ~~**[S] Frame loop reaching into PPU**~~ -- **DONE**. `Ppu::set_scanline()` added, all callers updated.

@@ -85,9 +85,27 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(cart: Cartridge) -> Self {
+        // Fill WRAM with a deterministic pseudo-random pattern instead of
+        // all-zeros. Real hardware powers on with garbage in WRAM; some
+        // games rely on this for RNG seeding (Near documents Dirt Racer
+        // and Hurricanes as affected). The pattern must be deterministic
+        // so the bench hash contract holds across runs.
+        //
+        // Uses xorshift32 seeded with a fixed value. The specific pattern
+        // doesn't matter much — what matters is that it's non-zero and
+        // varies across addresses.
+        let mut wram = Box::new([0u8; 0x20000]);
+        let mut rng: u32 = 0xDEAD_BEEF; // fixed seed — deterministic
+        for byte in wram.iter_mut() {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            *byte = rng as u8;
+        }
+
         Self {
             cart,
-            wram: Box::new([0u8; 0x20000]),
+            wram,
             ppu: Ppu::new(),
             apu: Apu::new(),
             dma: Dma::new(),

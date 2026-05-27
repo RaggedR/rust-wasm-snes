@@ -18,14 +18,10 @@ SRAM at $20-$3F:$6000-$7FFF, header auto-detection by scoring both
 $7FC0 and $FFC0 offsets. `Cartridge::read()` dispatches LoROM vs HiROM
 offset formula with ROM mirroring. Done 2026-05-27.
 
-### WRAM randomisation
-Currently zeroed on startup. Near documents games that rely on random
-WRAM for initial RNG seeding (Dirt Racer, Hurricanes). Fill WRAM with
-a fixed pseudo-random pattern (not truly random — determinism contract
-must hold). Use a seeded xorshift or similar.
-
-**Files:** `src/bus.rs` (Bus::new)
-**Effort:** 30 minutes
+### ~~WRAM randomisation~~ DONE
+WRAM filled with deterministic xorshift32 pattern (seed `0xDEAD_BEEF`)
+instead of all-zeros. SMW and Zelda 3 hashes unchanged — both games
+clear WRAM on init. Done 2026-05-27.
 
 ### Player 2 joypad stub
 `$4017` / `$4219` return hardcoded 0. Not a priority, but if a game
@@ -123,9 +119,6 @@ architecture sweep).
 
 ---
 
-## Stale docs to update
-
-- `docs/ARCHITECTURE.md` still lists BCD as missing (fixed in sweep 3)
-- `docs/ARCHITECTURE.md` still lists auto-joypad as missing (fixed in sweep 2)
-- `docs/ARCHITECTURE.md` remaining issues #6, #7, #8 are now fixed
-- `docs/OPEN_TASKS.md` T13 is implemented in PR #22 but listed as pending
+### ~~Stale docs~~ DONE
+ARCHITECTURE.md updated: BCD marked done, issues #6/#7/#8 marked done.
+OPEN_TASKS.md: T13 marked done. Done 2026-05-27.

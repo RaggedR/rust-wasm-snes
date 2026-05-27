@@ -8,14 +8,10 @@ Ordered roughly by leverage; not strictly by dependency.
 
 ## High-impact (Phase B continuation)
 
-### T13 — AudioWorklet + audio ring SAB *(the headline fix)*
-Replace the deprecated `ScriptProcessorNode` audio path with an AudioWorklet driven by a SharedArrayBuffer ring buffer. Per `PHASE_B_PLAN.md`, this is the architectural fix for the original "audio is fucked up" complaint that motivated Phase B.
-
-A side effect of doing this properly: AudioWorklet wants a steady sample stream, which forces the SPC700 to deliver samples without chunky `catch_up` bursts. So whoever does T13 will likely *also* solve T10's chunking blocker — they pair naturally.
-
-- **Depends on:** T12 (SAB infrastructure)
-- **Acceptance:** hashes unchanged; audio glitch-free under simulated main-thread load (artificial `setTimeout 200ms` blocks)
-- **Effort:** 2 sessions
+### ~~T13 — AudioWorklet + audio ring SAB~~ *(DONE — commit `63775ed`)*
+AudioWorklet replaces ScriptProcessorNode. SharedArrayBuffer ring buffer
+with Near's DRC formula at 32040 Hz base frequency. Landed with JIT sync,
+19 synchronisation contract tests, and `docs/ASYNC_MODEL.md`.
 
 ### T12 — SharedArrayBuffer for framebuffer *(Phase B Step 2)*
 Move framebuffer transfer from per-frame `postMessage` to a SharedArrayBuffer shared between worker and main thread. Builds on PR #7's worker scaffold (merged 2026-05-12).
