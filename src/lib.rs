@@ -183,12 +183,6 @@ impl Emulator {
         self.cpu.idle_skip_hits
     }
 
-    /// Diagnostic: number of times idle-skip aborted because the APU wrote
-    /// to a port during the bulk catch_up. Non-zero means the port-write
-    /// guard is triggering.
-    pub fn idle_skip_aborted(&self) -> u64 {
-        self.cpu.idle_skip_aborted
-    }
 
     /// Diagnostic: cumulative master cycles skipped by the idle-loop fast path.
     pub fn idle_skip_cycles(&self) -> u64 {

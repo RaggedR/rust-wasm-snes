@@ -112,7 +112,6 @@ pub struct Cpu {
     /// Number of times idle-skip aborted because the APU wrote to a port
     /// during the bulk catch_up. Diagnostic — this counter tells you whether
     /// the port-write guard is ever triggering.
-    pub idle_skip_aborted: u64,
 
     /// Cumulative master cycles skipped by the idle-loop fast path. Diagnostic.
     pub idle_skip_cycles: u64,
@@ -139,7 +138,6 @@ impl Cpu {
             trace: false,
             opcode_counts: Box::new([0u64; 256]),
             idle_skip_hits: 0,
-            idle_skip_aborted: 0,
             idle_skip_cycles: 0,
         }
     }
@@ -241,6 +239,10 @@ impl Cpu {
         let iter_cost = lda_master + beq_master;
 
         // Skip whole iterations, preserving exact cycle alignment.
+        // Note: opcode_speed is sampled once — MEMSEL (FastROM toggle) is
+        // static mid-scanline, and tight polling loops don't cross speed
+        // boundaries. FastROM games get opcode_speed=6 here (untested but
+        // formula is correct; gated behind feature flag).
         let iterations = (budget - SAFETY_MARGIN) / iter_cost;
         if iterations == 0 {
             return None;
@@ -254,9 +256,11 @@ impl Cpu {
         // would have in the unskipped run.
         self.idle_skip_hits += 1;
         self.idle_skip_cycles += skip;
-        // Return 0: cpu.cycles and apu.catch_up are both already accounted
-        // for above. Outer loop will do `cpu.cycles += 0` and
-        // `apu.catch_up(0)`, both no-ops.
+        // Return Some(0): cycles were credited internally (self.cycles +=
+        // skip). The APU is NOT advanced here — it catches up at the next
+        // sync_apu() call (end-of-scanline or port read), which sees the
+        // full delta including the skipped span. This matches normal
+        // execution where the polling loop doesn't trigger sync_apu().
         Some(0)
     }
 
