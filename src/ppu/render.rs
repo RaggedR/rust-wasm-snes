@@ -886,3 +886,51 @@ impl Ppu {
         )
     }
 }
+
+#[cfg(test)]
+mod blend_tests {
+    use crate::ppu::Ppu;
+
+    /// Pack RGB555: r, g, b each 0-31.
+    fn rgb(r: u16, g: u16, b: u16) -> u16 {
+        r | (g << 5) | (b << 10)
+    }
+
+    fn unpack(c: u16) -> (u16, u16, u16) {
+        (c & 0x1F, (c >> 5) & 0x1F, (c >> 10) & 0x1F)
+    }
+
+    #[test]
+    fn half_add_overflow_clamps_before_halving() {
+        // 20 + 20 = 40 → clamp 31 → halve 15 (not 40/2=20)
+        let mut ppu = Ppu::new();
+        ppu.cgadsub = 0x40; // add + half-math
+        let result = ppu.blend_colors(rgb(20, 20, 20), rgb(20, 20, 20));
+        let (r, g, b) = unpack(result);
+        assert_eq!(r, 15, "half-add overflow: clamp(40,31)/2 = 15");
+        assert_eq!(g, 15);
+        assert_eq!(b, 15);
+    }
+
+    #[test]
+    fn half_add_no_overflow() {
+        // 10 + 8 = 18 → clamp 18 → halve 9
+        let mut ppu = Ppu::new();
+        ppu.cgadsub = 0x40;
+        let result = ppu.blend_colors(rgb(10, 10, 10), rgb(8, 8, 8));
+        let (r, _, _) = unpack(result);
+        assert_eq!(r, 9);
+    }
+
+    #[test]
+    fn half_subtract_underflow() {
+        // 5 - 10 = -5 → clamp 0 → halve 0
+        let mut ppu = Ppu::new();
+        ppu.cgadsub = 0xC0; // subtract + half-math
+        let result = ppu.blend_colors(rgb(5, 5, 5), rgb(10, 10, 10));
+        let (r, g, b) = unpack(result);
+        assert_eq!(r, 0);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+    }
+}

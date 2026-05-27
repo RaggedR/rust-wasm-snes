@@ -1585,4 +1585,39 @@ mod bcd_tests {
         assert!(cpu.p.c, "no borrow");
         assert!(cpu.p.z, "zero flag set");
     }
+
+    // --- ADC16 / SBC16 BCD (16-bit mode) ---
+
+    fn cpu16_with_decimal(a: u16, carry: bool) -> Cpu {
+        let mut cpu = Cpu::new();
+        cpu.a = a;
+        cpu.p.d = true;
+        cpu.p.c = carry;
+        cpu.p.m = false; // 16-bit accumulator
+        cpu
+    }
+
+    #[test]
+    fn adc16_bcd_0099_plus_0001() {
+        let mut cpu = cpu16_with_decimal(0x0099, false);
+        adc16(&mut cpu, 0x0001);
+        assert_eq!(cpu.a, 0x0100, "0099 + 0001 = 0100 BCD");
+        assert!(!cpu.p.c, "no carry");
+    }
+
+    #[test]
+    fn adc16_bcd_9999_plus_0001() {
+        let mut cpu = cpu16_with_decimal(0x9999, false);
+        adc16(&mut cpu, 0x0001);
+        assert_eq!(cpu.a, 0x0000, "9999 + 0001 = 0000 BCD (overflow)");
+        assert!(cpu.p.c, "carry set");
+    }
+
+    #[test]
+    fn sbc16_bcd_1000_minus_0001() {
+        let mut cpu = cpu16_with_decimal(0x1000, true);
+        sbc16(&mut cpu, 0x0001);
+        assert_eq!(cpu.a, 0x0999, "1000 - 0001 = 0999 BCD");
+        assert!(cpu.p.c, "no borrow");
+    }
 }
