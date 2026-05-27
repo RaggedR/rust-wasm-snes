@@ -98,7 +98,7 @@ impl Emulator {
     /// new code should prefer `run_frame_no_return()` + `framebuffer_ptr()`
     /// for zero-copy access.
     pub fn run_frame(&mut self) -> Vec<u8> {
-        self.run_frame_inner();
+        self.run_frame_inner(false);
         self.rgba_buffer.clone()
     }
 
@@ -106,7 +106,14 @@ impl Emulator {
     /// persistent internal buffer. Combine with `framebuffer_ptr()` and
     /// `framebuffer_len()` to read it from JS without copying.
     pub fn run_frame_no_return(&mut self) {
-        self.run_frame_inner();
+        self.run_frame_inner(false);
+    }
+
+    /// Run one frame without rendering (CPU/APU only, no PPU scanline
+    /// output). Used by run-ahead: intermediate frames skip rendering
+    /// for ~40% speedup since the framebuffer is discarded anyway.
+    pub fn run_frame_skip_render(&mut self) {
+        self.run_frame_inner(true);
     }
 
     /// Byte offset of the persistent framebuffer within WASM linear memory.
@@ -186,8 +193,12 @@ impl Emulator {
 
     /// Shared inner implementation: runs one frame of emulation, writes the
     /// resulting ARGB framebuffer to `self.rgba_buffer` as RGBA bytes.
+    /// When `skip_render` is true, PPU scanline rendering is bypassed
+    /// (CPU, APU, DMA, and HDMA still execute normally). This is the
+    /// building block for run-ahead: intermediate look-ahead frames
+    /// don't need a framebuffer.
     /// Private — not exported via wasm-bindgen.
-    fn run_frame_inner(&mut self) {
+    fn run_frame_inner(&mut self, skip_render: bool) {
         for scanline in 0..SCANLINES_PER_FRAME {
             // VBlank start
             if scanline == VBLANK_START {
@@ -196,8 +207,20 @@ impl Emulator {
                 if self.bus.nmitimen & 0x80 != 0 {
                     self.cpu.nmi_pending = true;
                 }
-                // Auto-joypad read happens at VBlank start
-                self.bus.auto_joypad_busy = false;
+                // Auto-joypad polling: if enabled by nmitimen bit 0, the
+                // SNES hardware serially shifts 16 bits from each controller
+                // over 4224 master cycles (~3.1 scanlines). During this
+                // window $4212 bit 0 reads as 1 and $4218/$4219 contain
+                // partially-shifted data. We use the simplified model:
+                // latch the full result immediately but keep the busy flag
+                // set for the correct duration.
+                if self.bus.nmitimen & 0x01 != 0 {
+                    self.bus.auto_joypad_busy = true;
+                    self.bus.auto_joypad_timer = 4224;
+                    self.bus.auto_joypad_result = self.bus.joypad.current;
+                } else {
+                    self.bus.auto_joypad_busy = false;
+                }
             }
 
             // VBlank end / new frame
@@ -271,6 +294,18 @@ impl Emulator {
                 // subsequent reads/writes knows the current cycle.
                 self.bus.master_clock = self.cpu.cycles;
 
+                // Auto-joypad busy timer: decrement by elapsed master
+                // cycles. When it reaches 0 the busy flag clears and
+                // $4218/$4219 hold the final latched result.
+                if self.bus.auto_joypad_busy {
+                    if elapsed as u32 >= self.bus.auto_joypad_timer {
+                        self.bus.auto_joypad_timer = 0;
+                        self.bus.auto_joypad_busy = false;
+                    } else {
+                        self.bus.auto_joypad_timer -= elapsed as u32;
+                    }
+                }
+
                 // Add any DMA cycles. During DMA the APU continues running
                 // on real hardware, so we credit the APU immediately.
                 if self.bus.pending_dma_cycles > 0 {
@@ -292,7 +327,9 @@ impl Emulator {
             if scanline >= 1 && scanline <= VISIBLE_SCANLINES {
                 // Run HDMA before rendering each scanline
                 self.bus.hdma_run_scanline();
-                self.bus.ppu.render_scanline(scanline - 1);
+                if !skip_render {
+                    self.bus.ppu.render_scanline(scanline - 1);
+                }
             }
         }
 
@@ -300,14 +337,17 @@ impl Emulator {
 
         // Convert framebuffer to RGBA bytes into the persistent buffer.
         // Our framebuffer is ARGB u32; Canvas wants RGBA u8.
-        let fb = &self.bus.ppu.frame_buffer;
-        let dst = &mut self.rgba_buffer;
-        for (i, &pixel) in fb.iter().enumerate() {
-            let o = i * 4;
-            dst[o]     = ((pixel >> 16) & 0xFF) as u8; // R
-            dst[o + 1] = ((pixel >> 8)  & 0xFF) as u8; // G
-            dst[o + 2] = ( pixel        & 0xFF) as u8; // B
-            dst[o + 3] = 255;                          // A
+        // Skip the conversion when rendering was bypassed (run-ahead).
+        if !skip_render {
+            let fb = &self.bus.ppu.frame_buffer;
+            let dst = &mut self.rgba_buffer;
+            for (i, &pixel) in fb.iter().enumerate() {
+                let o = i * 4;
+                dst[o]     = ((pixel >> 16) & 0xFF) as u8; // R
+                dst[o + 1] = ((pixel >> 8)  & 0xFF) as u8; // G
+                dst[o + 2] = ( pixel        & 0xFF) as u8; // B
+                dst[o + 3] = 255;                          // A
+            }
         }
     }
 

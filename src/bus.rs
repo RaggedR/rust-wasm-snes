@@ -42,6 +42,14 @@ pub struct Bus {
     pub nmi_flag: bool,  // Set on VBlank, cleared on $4210 read
     pub irq_flag: bool,  // Set on V/H-count match, cleared on $4211 read
     pub auto_joypad_busy: bool,
+    /// Countdown timer for the auto-joypad busy window (4224 master cycles).
+    /// Decremented each CPU step; when it reaches 0, auto_joypad_busy clears
+    /// and the latched result becomes valid in $4218/$4219.
+    pub auto_joypad_timer: u32,
+    /// Latched joypad state captured at the start of auto-joypad polling.
+    /// $4218/$4219 return this value (not live joypad.current) — matches
+    /// real hardware where the result is frozen at VBlank poll time.
+    pub auto_joypad_result: u16,
 
     pub open_bus: u8,
 
@@ -105,6 +113,8 @@ impl Bus {
             nmi_flag: false,
             irq_flag: false,
             auto_joypad_busy: false,
+            auto_joypad_timer: 0,
+            auto_joypad_result: 0,
 
             open_bus: 0,
             pending_dma_cycles: 0,
@@ -293,8 +303,8 @@ impl Bus {
             0x4215 => (self.rddiv >> 8) as u8,    // RDDIVH
             0x4216 => self.rdmpy as u8,           // RDMPYL
             0x4217 => (self.rdmpy >> 8) as u8,    // RDMPYH
-            0x4218 => self.joypad.read_auto() as u8,   // JOY1L
-            0x4219 => (self.joypad.read_auto() >> 8) as u8, // JOY1H
+            0x4218 => self.auto_joypad_result as u8,   // JOY1L
+            0x4219 => (self.auto_joypad_result >> 8) as u8, // JOY1H
             0x421A..=0x421F => 0, // JOY2-4 (unused)
             _ => self.open_bus,
         }

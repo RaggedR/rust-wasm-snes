@@ -34,7 +34,13 @@ fn run_frame(cpu: &mut Cpu, bus: &mut Bus) {
             bus.vblank = true;
             bus.nmi_flag = true;
             if bus.nmitimen & 0x80 != 0 { cpu.nmi_pending = true; }
-            bus.auto_joypad_busy = false;
+            if bus.nmitimen & 0x01 != 0 {
+                bus.auto_joypad_busy = true;
+                bus.auto_joypad_timer = 4224;
+                bus.auto_joypad_result = bus.joypad.current;
+            } else {
+                bus.auto_joypad_busy = false;
+            }
         }
         if scanline == 0 {
             bus.vblank = false;
@@ -60,6 +66,14 @@ fn run_frame(cpu: &mut Cpu, bus: &mut Bus) {
             bus.last_write_pc = cpu.pc;
             let elapsed = cpu.step(bus);
             cpu.cycles += elapsed;
+            if bus.auto_joypad_busy {
+                if elapsed as u32 >= bus.auto_joypad_timer {
+                    bus.auto_joypad_timer = 0;
+                    bus.auto_joypad_busy = false;
+                } else {
+                    bus.auto_joypad_timer -= elapsed as u32;
+                }
+            }
             if bus.pending_dma_cycles > 0 {
                 let dma = bus.pending_dma_cycles;
                 cpu.cycles += dma;

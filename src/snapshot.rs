@@ -31,9 +31,9 @@ use crate::dma::{Dma, DmaChannel};
 use crate::joypad::Joypad;
 use crate::ppu::{Ppu, BgLayer};
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
+/// V3: Added auto_joypad_timer (u32) and auto_joypad_result (u16) to Bus.
 /// V2: APU field `cycle_debt: i64` replaced with `cycle_target: u64`.
-/// Same byte width, different semantics — old saves must be rejected.
-const VERSION: u8 = 2;
+const VERSION: u8 = 3;
 
 // ─── Writer helpers ─────────────────────────────────────────────────────
 
@@ -423,6 +423,8 @@ fn write_bus(out: &mut Vec<u8>, bus: &Bus) {
     w_bool(out, bus.nmi_flag);
     w_bool(out, bus.irq_flag);
     w_bool(out, bus.auto_joypad_busy);
+    w_u32(out, bus.auto_joypad_timer);
+    w_u16(out, bus.auto_joypad_result);
     w_u8(out, bus.open_bus);
     w_u64(out, bus.pending_dma_cycles);
     w_u8(out, bus.last_write_bank);
@@ -471,6 +473,8 @@ fn read_bus(r: &mut &[u8], bus: &mut Bus) -> Result<(), String> {
     bus.nmi_flag = r_bool(r)?;
     bus.irq_flag = r_bool(r)?;
     bus.auto_joypad_busy = r_bool(r)?;
+    bus.auto_joypad_timer = r_u32(r)?;
+    bus.auto_joypad_result = r_u16(r)?;
     bus.open_bus = r_u8(r)?;
     bus.pending_dma_cycles = r_u64(r)?;
     bus.last_write_bank = r_u8(r)?;
