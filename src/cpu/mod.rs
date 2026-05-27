@@ -305,10 +305,10 @@ impl Cpu {
 
         // Idle-loop fast path (T10). Gated behind the `idle-skip` Cargo
         // feature — off by default. CPU semantics are correct under this
-        // path (framebuffer hash preserved). The APU now uses an absolute
-        // cycle target (not relative debt), making catch_up chunk-insensitive
-        // — the distributive law for CPU ∥ APU composition holds.
-        // See `docs/T10_IDLE_LOOP_DETECTION.md` for the design.
+        // path (framebuffer hash preserved). The APU's absolute cycle target
+        // makes catch_up chunk-insensitive (distributive law holds), but
+        // audio still diverges under idle-skip due to stale APU port state
+        // during the bulk skip. See `docs/T10_IDLE_LOOP_DETECTION.md` §9.2.
         #[cfg(feature = "idle-skip")]
         if let Some(skip) = self.try_idle_skip(bus) {
             return skip;
