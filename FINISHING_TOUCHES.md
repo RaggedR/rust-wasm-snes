@@ -74,23 +74,18 @@ Added `Ppu::set_scanline()`, all callers updated. Done 2026-05-27.
 
 ## Multi-session refactors (from architecture sweep)
 
-### DMA execution in bus.rs
-186 lines of DMA transfer logic in `bus.rs` because `execute_general_dma`
-needs `&mut Bus` to read/write while DMA is owned by Bus. The borrow
-checker prevents moving it to `dma.rs`. Needs a trait-based dispatch,
-callback pattern, or split-borrow refactor.
+### ~~DMA execution in bus.rs~~ DONE
+235 lines of DMA logic extracted from `bus.rs` to `dma.rs` using
+`std::mem::take` split-borrow pattern. Done 2026-05-27.
 
-**Files:** `src/bus.rs`, `src/dma.rs`
-**Effort:** 1-2 sessions
+### Pervasive `pub` fields — partially done
+Snapshot serialization moved into each struct (Ppu, Cpu, Dma, Joypad,
+Apu all have snapshot_write/snapshot_read methods). `Cpu::stopped`
+and `Cpu::waiting` privatized. Remaining: Bus fields still accessed
+directly by snapshot.rs's write_bus/read_bus (~20 fields).
 
-### Pervasive `pub` fields
-~100 fields across Bus/PPU/CPU/DMA are all `pub` because `snapshot.rs`
-accesses them directly. Need accessor methods on each struct + refactored
-snapshot serialisation. Started with Joypad (accessors added in
-architecture sweep).
-
-**Files:** all `src/` structs + `src/snapshot.rs`
-**Effort:** 2-3 sessions
+**Files:** `src/bus.rs`, `src/snapshot.rs`
+**Effort:** 1 session
 
 ---
 
