@@ -96,8 +96,8 @@ pub struct Cpu {
     pub nmi_pending: bool,
     pub irq_pending: bool,
 
-    stopped: bool, // STP — only accessed by snapshot and instruction handlers
-    waiting: bool, // WAI — only accessed by snapshot and instruction handlers
+    pub stopped: bool, // STP — pub for integration tests
+    pub waiting: bool, // WAI — pub for integration tests
 
     /// Enable instruction tracing to stderr.
     pub trace: bool,

@@ -37,8 +37,8 @@ pub struct Bus {
     rddiv: u16,      // $4214-$4215 (division result)
     rdmpy: u16,      // $4216-$4217 (multiplication result)
 
-    // ── WRAM data port (internal — accessed only by register handlers + snapshot) ──
-    wram_addr: u32,  // $2181-$2183 (17-bit)
+    // ── WRAM data port ────────────────────────────────────
+    pub wram_addr: u32,  // $2181-$2183 (17-bit) — pub for integration tests
 
     // ── Timing/status ─────────────────────────────────────
     pub vblank: bool,
@@ -655,6 +655,10 @@ impl Bus {
         self.pending_dma_cycles = r_u64(r)?;
         self.last_write_bank = r_u8(r)?;
         self.last_write_pc = r_u16(r)?;
+        // master_clock and last_apu_sync are transient JIT sync state —
+        // not persisted. They are initialized to cpu.cycles in
+        // restore_state() (snapshot.rs), since snapshot_read doesn't
+        // have access to cpu.cycles.
         // Sub-components
         self.ppu.snapshot_read(r)?;
         self.dma.snapshot_read(r)?;
