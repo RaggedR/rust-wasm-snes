@@ -138,6 +138,7 @@
 
         let workerReady = false;
         let lastFrameCount = 0n;
+        let diagToggle = new URLSearchParams(location.search).has('diag');
 
         // ── Audio: AudioWorklet + SharedArrayBuffer + DRC (Phase B Step 3) ───
         //
@@ -239,10 +240,11 @@
             await startEmulator(data, file.name);
         }
 
-        // Try local ROM auto-load (mirrors index.html behavior).
+        // Auto-load ROM: prefer ?rom= URL param, fall back to rom/zelda3.smc.
         (async () => {
             try {
-                const resp = await fetch('rom/zelda3.smc');
+                const romUrl = new URLSearchParams(location.search).get('rom') || 'rom/zelda3.smc';
+                const resp = await fetch(romUrl);
                 if (resp.ok) {
                     const data = new Uint8Array(await resp.arrayBuffer());
                     let romTitle = 'SNES Game';
@@ -279,6 +281,11 @@
                 { type: 'load', rom: romCopy },
                 [romCopy.buffer]
             );
+
+            // Enable diagnostics if ?diag=1 is in the URL.
+            if (diagToggle) {
+                worker.postMessage({ type: 'diag', enabled: true });
+            }
         }
 
         // ── Stop / back ───────────────────────────────────────
@@ -295,6 +302,13 @@
         // ── Input handling ────────────────────────────────────
         document.addEventListener('keydown', (e) => {
             if (e.code === 'Escape') { stopEmulator(); return; }
+            if (e.code === 'KeyD' && e.ctrlKey) {
+                e.preventDefault();
+                diagToggle = !diagToggle;
+                worker.postMessage({ type: 'diag', enabled: diagToggle });
+                status.textContent = `Diagnostics ${diagToggle ? 'ON' : 'OFF'}`;
+                return;
+            }
             const btn = KEY_MAP[e.code];
             if (btn !== undefined) {
                 e.preventDefault();

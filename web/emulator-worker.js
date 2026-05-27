@@ -16,6 +16,23 @@ let wasmMemory = null;
 let loopHandle = null;
 let frameSeq = 0;
 
+// ── Diagnostics (toggled via { type:'diag', enabled:true } message) ──
+let diagEnabled = false;
+let lastAudioRms = 0;
+let lastAudioSampleCount = 0;
+let lastAudioClipCount = 0;
+
+function fnv1a64_fast(bytes) {
+    let h = 0xcbf29ce484222325n;
+    const prime = 0x100000001b3n;
+    const mask = 0xffffffffffffffffn;
+    for (let i = 0; i < bytes.length; i++) {
+        h = (h ^ BigInt(bytes[i])) & mask;
+        h = (h * prime) & mask;
+    }
+    return h.toString(16).padStart(16, '0');
+}
+
 // Audio ring buffer (SharedArrayBuffer)
 let audioRingSAB = null;
 let audioRingI16 = null;     // Int16Array view of sample data
@@ -58,6 +75,21 @@ function writeAudioToRing() {
     }
 
     Atomics.store(audioControlU32, 0, wp % cap);
+
+    // Compute audio health metrics before clearing (only when diag is on).
+    if (diagEnabled) {
+        let sumSq = 0;
+        let clip = 0;
+        for (let i = 0; i < sampleCount; i++) {
+            const s = wasmView[i];
+            sumSq += s * s;
+            if (s === 32767 || s === -32768) clip++;
+        }
+        lastAudioRms = Math.sqrt(sumSq / sampleCount);
+        lastAudioSampleCount = sampleCount;
+        lastAudioClipCount = clip;
+    }
+
     emulator.clear_audio_samples();
 }
 
@@ -86,6 +118,22 @@ function tick() {
         },
         [fbCopy.buffer]
     );
+
+    // Emit diagnostic line (picked up by watch-cli.js or DevTools).
+    if (diagEnabled) {
+        const pc24 = (emulator.cpu_pbr() << 16) | emulator.cpu_pc();
+        let fbHash = null;
+        if (frameSeq % 8 === 0) {
+            const diagFbView = new Uint8Array(wasmMemory.buffer,
+                emulator.framebuffer_ptr(), Math.min(2048, emulator.framebuffer_len()));
+            fbHash = fnv1a64_fast(diagFbView);
+        }
+        console.log(JSON.stringify({
+            t: 'diag', n: frameSeq, pc: pc24, fb: fbHash,
+            audio_rms: lastAudioRms, audio_samples: lastAudioSampleCount,
+            audio_clip: lastAudioClipCount,
+        }));
+    }
 }
 
 function startLoop() {
@@ -121,6 +169,9 @@ self.onmessage = async (ev) => {
             audioControlU32 = new Uint32Array(audioRingSAB, 0, 2);
             audioRingI16 = new Int16Array(audioRingSAB, 8);
             audioRingCapacity = audioRingI16.length;
+            break;
+        case 'diag':
+            diagEnabled = msg.enabled;
             break;
         default:
             break;
