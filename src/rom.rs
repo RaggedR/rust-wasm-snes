@@ -48,9 +48,12 @@ fn score_header(rom: &[u8], offset: usize, expect_hirom: bool) -> u32 {
         score += 4;
     }
 
-    // Map-mode byte's bit 0 should agree with the expected mapping.
+    // Map-mode byte's low nibble encodes the base mapping:
+    //   $00/$20/$30 = LoROM, $01/$21/$31 = HiROM, $03/$23 = SA-1 (LoROM-adjacent).
+    // SA-1 has bit 0 set but is NOT HiROM — check the full low nibble.
     let map_byte = h[0x15];
-    let is_hirom = map_byte & 0x01 != 0;
+    let base_map = map_byte & 0x0F;
+    let is_hirom = base_map == 0x01; // only true HiROM, not SA-1 ($03) or ExHiROM ($05)
     if is_hirom == expect_hirom {
         score += 2;
     }
@@ -84,35 +87,36 @@ pub fn header_offset(mode: MapMode) -> usize {
 /// Decode the ROM type byte ($xFD6) into a human-readable chip name.
 /// Returns `None` for plain ROM/RAM/battery configurations that don't
 /// require a coprocessor.
+///
+/// The coprocessor identity is encoded in the high nibble of `rom_type`.
+/// The map byte's low nibble distinguishes SA-1 ($x3) from normal mappings.
 pub fn special_chip_name(map_byte: u8, rom_type: u8) -> Option<&'static str> {
-    // Map byte high nibble encodes extended mappings.
-    let base_map = map_byte & 0x0F;
-    match base_map {
-        0x03 => return Some("SA-1"),
-        0x05 => return Some("ExHiROM"),
-        _ => {}
+    // SA-1 is identified by map mode $x3, but only when rom_type also
+    // indicates a coprocessor (>= $03). A plain ROM with a corrupted
+    // map byte shouldn't trigger a false warning.
+    if map_byte & 0x0F == 0x03 && rom_type >= 0x03 {
+        return Some("SA-1");
     }
 
-    // ROM type byte: values $03+ indicate a coprocessor.
-    // The coprocessor identity is encoded in bits 4-7 of the map byte
-    // combined with the ROM type. Simplified lookup for common chips:
-    match rom_type {
-        0x00..=0x02 => None, // ROM only, ROM+RAM, ROM+RAM+Battery
-        0x03..=0x06 => {
-            // Coprocessor present — identify by map byte high nibble.
+    // ROM type byte: $00-$02 = ROM/RAM/Battery only, no coprocessor.
+    // $03+ = coprocessor present; high nibble identifies which one.
+    match rom_type >> 4 {
+        0x0 if rom_type <= 0x02 => None,
+        0x0 => {
+            // $03-$06: coprocessor identified by map byte high nibble.
             match map_byte & 0xF0 {
                 0x00 | 0x30 => Some("DSP-1"),
                 0x20 => Some("OBC-1"),
                 _ => Some("unknown coprocessor"),
             }
         }
-        0x13..=0x16 => Some("SuperFX"),
-        0x25 | 0x35 => Some("S-RTC"),
-        0x33..=0x36 => Some("SA-1"),
-        0x43..=0x46 => Some("S-DD1"),
-        0x53..=0x56 => Some("S-RTC"),
-        0xE3..=0xE6 => Some("other (Game Boy, etc.)"),
-        0xF3..=0xF6 => Some("ST010/ST011"),
+        0x1 => Some("SuperFX"),
+        0x2 => Some("S-RTC"),
+        0x3 => Some("SA-1"),
+        0x4 => Some("S-DD1"),
+        0x5 => Some("S-RTC"),
+        0xE => Some("other (Game Boy, etc.)"),
+        0xF => Some("ST010/ST011"),
         _ => Some("unknown coprocessor"),
     }
 }

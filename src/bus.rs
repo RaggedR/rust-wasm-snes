@@ -251,14 +251,13 @@ impl Bus {
             (0x00..=0x3F, 0x4017) => 0, // Player 2 — not implemented
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
             (0x00..=0x3F, 0x4300..=0x437F) => self.dma.read(addr),
-            // HiROM SRAM: banks $20-$3F, $6000-$7FFF
+            // HiROM SRAM: banks $20-$3F, $6000-$7FFF.
+            // Real hardware mirrors the SRAM across all banks — the bank
+            // bits above the SRAM size are not decoded by the chip.
             (0x20..=0x3F, 0x6000..=0x7FFF) if self.cart.map_mode == MapMode::HiROM => {
-                let offset = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
-                if offset < self.cart.sram.len() {
-                    self.cart.sram[offset]
-                } else {
-                    self.open_bus
-                }
+                if self.cart.sram.is_empty() { return self.open_bus; }
+                let linear = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
+                self.cart.sram[linear % self.cart.sram.len()]
             }
             (0x00..=0x3F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
 
@@ -275,13 +274,13 @@ impl Bus {
             (0x70..=0x7D, 0x0000..=0x7FFF) => {
                 match self.cart.map_mode {
                     MapMode::LoROM => {
-                        // LoROM SRAM
-                        let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
-                        if offset < self.cart.sram.len() {
-                            self.cart.sram[offset]
-                        } else {
-                            self.open_bus
-                        }
+                        // LoROM SRAM: 8KB per bank at $0000-$1FFF, mirrored
+                        // through $2000-$7FFF. Mask to 13 bits so the stride
+                        // matches the physical SRAM chip's address decoding.
+                        if self.cart.sram.is_empty() { return self.open_bus; }
+                        let linear = ((eb - 0x70) as usize) * 0x2000
+                            + (addr as usize & 0x1FFF);
+                        self.cart.sram[linear % self.cart.sram.len()]
                     }
                     MapMode::HiROM => self.cart.read(bank, addr), // ROM
                 }
@@ -342,11 +341,12 @@ impl Bus {
             (0x00..=0x3F, 0x4016) => { self.joypad.write_strobe(val); }
             (0x00..=0x3F, 0x4200..=0x42FF) => { self.write_cpu_register(addr, val); }
             (0x00..=0x3F, 0x4300..=0x437F) => { self.dma.write(addr, val); }
-            // HiROM SRAM: banks $20-$3F, $6000-$7FFF
+            // HiROM SRAM: banks $20-$3F, $6000-$7FFF (mirrored).
             (0x20..=0x3F, 0x6000..=0x7FFF) if self.cart.map_mode == MapMode::HiROM => {
-                let offset = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
-                if offset < self.cart.sram.len() {
-                    self.cart.sram[offset] = val;
+                let sram_len = self.cart.sram.len();
+                if sram_len > 0 {
+                    let linear = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
+                    self.cart.sram[linear % sram_len] = val;
                 }
             }
             (0x00..=0x3F, 0x8000..=0xFFFF) => {} // ROM — writes ignored
@@ -364,10 +364,12 @@ impl Bus {
             (0x70..=0x7D, 0x0000..=0x7FFF) => {
                 match self.cart.map_mode {
                     MapMode::LoROM => {
-                        // LoROM SRAM
-                        let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
-                        if offset < self.cart.sram.len() {
-                            self.cart.sram[offset] = val;
+                        // LoROM SRAM: 8KB per bank, mirrored (see read path).
+                        let sram_len = self.cart.sram.len();
+                        if sram_len > 0 {
+                            let linear = ((eb - 0x70) as usize) * 0x2000
+                                + (addr as usize & 0x1FFF);
+                            self.cart.sram[linear % sram_len] = val;
                         }
                     }
                     MapMode::HiROM => {} // ROM — writes ignored
