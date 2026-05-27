@@ -56,22 +56,34 @@ impl Emulator {
             rom_data.to_vec()
         };
 
-        // Parse header (simplified — we know it's LoROM LTTP).
-        let title = if rom.len() > 0x7FD4 {
-            String::from_utf8_lossy(&rom[0x7FC0..0x7FD5]).trim().to_string()
+        // Detect LoROM vs HiROM by scoring headers at both offsets.
+        let map_mode = rom::detect_map_mode(&rom);
+        let h_off = rom::header_offset(map_mode);
+
+        let title = if rom.len() > h_off + 0x14 {
+            String::from_utf8_lossy(&rom[h_off..h_off + 21]).trim().to_string()
         } else {
             "Unknown".to_string()
         };
-        log(&format!("ROM loaded: \"{title}\" ({} KB)", rom.len() / 1024));
+        log(&format!("ROM loaded: \"{title}\" ({} KB, {:?})", rom.len() / 1024, map_mode));
 
-        let ram_size_code = if rom.len() > 0x7FD8 { rom[0x7FD8] } else { 0 };
+        // Warn about special chips.
+        if rom.len() > h_off + 0x16 {
+            let map_byte = rom[h_off + 0x15];
+            let rom_type = rom[h_off + 0x16];
+            if let Some(chip) = rom::special_chip_name(map_byte, rom_type) {
+                log(&format!("WARNING: ROM requires {} — not emulated", chip));
+            }
+        }
+
+        let ram_size_code = if rom.len() > h_off + 0x18 { rom[h_off + 0x18] } else { 0 };
         let ram_size = if ram_size_code == 0 { 0 } else { 1024usize << ram_size_code };
 
         let cart = Cartridge {
             rom,
             sram: vec![0u8; ram_size],
             title,
-            map_mode: rom::MapMode::LoROM,
+            map_mode,
             rom_size: 0, // Not needed at runtime
             ram_size,
             country: 0,

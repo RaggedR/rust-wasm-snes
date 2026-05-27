@@ -7,28 +7,16 @@ without major architectural work. Each item is a single session or less.
 
 ## Game compatibility
 
-### Special chip detection warning
-ROMs using SA-1, SuperFX, DSP-1, etc. load silently as plain LoROM and
-produce garbage. Add a check at ROM load time — the cartridge header at
-`$FFD5`–`$FFD6` declares the mapping/chip type. If it's anything other
-than LoROM (Mode $20) or HiROM (Mode $21), log a clear warning:
-`"This ROM requires [chip name] which is not emulated."` Prevents 30
-minutes of confused debugging.
+### ~~Special chip detection warning~~ DONE
+ROM type byte ($xFD6) and map mode byte ($xFD5) now parsed at both
+LoROM and HiROM header offsets. Warning logged for SA-1, SuperFX,
+DSP-1, OBC-1, S-DD1, S-RTC, and other coprocessor ROMs. Done 2026-05-27.
 
-**Files:** `src/lib.rs` (Emulator::new)
-**Effort:** 30 minutes
-
-### HiROM bus routing
-Currently parsed from the header but not dispatched — all ROMs are
-mapped as LoROM. HiROM games (Final Fantasy VI, Chrono Trigger, Mega
-Man X, etc.) won't boot. The memory map logic in `bus.rs` needs a
-second routing path for banks `$C0–$FF` mapped to the full 64KB ROM
-space (not just `$8000–$FFFF`). This is the single biggest
-game-compatibility improvement available.
-
-**Files:** `src/bus.rs`
-**Effort:** 1 session
-**Validate:** boot Mega Man X or Chrono Trigger to title screen
+### ~~HiROM bus routing~~ DONE
+Full HiROM memory map implemented: banks $40-$7D map full 64KB ROM,
+SRAM at $20-$3F:$6000-$7FFF, header auto-detection by scoring both
+$7FC0 and $FFC0 offsets. `Cartridge::read()` dispatches LoROM vs HiROM
+offset formula with ROM mirroring. Done 2026-05-27.
 
 ### WRAM randomisation
 Currently zeroed on startup. Near documents games that rely on random

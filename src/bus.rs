@@ -8,7 +8,7 @@ use crate::spc700::Apu;
 use crate::dma::{self, Dma};
 use crate::joypad::Joypad;
 use crate::ppu::Ppu;
-use crate::rom::Cartridge;
+use crate::rom::{Cartridge, MapMode};
 
 pub struct Bus {
     pub cart: Cartridge,
@@ -135,16 +135,19 @@ impl Bus {
     /// of an LDA→BEQ spin-wait is safe to elide.
     pub fn is_pure_memory(&self, bank: u8, addr: u16) -> bool {
         let eb = bank & 0x7F;
-        matches!(
-            (eb, addr),
-            (0x7E, _)                                 // full WRAM
-            | (0x7F, _)                               // full WRAM (upper)
-            | (0x00..=0x3F, 0x0000..=0x1FFF)          // WRAM low mirror
-            | (0x00..=0x3F, 0x8000..=0xFFFF)          // LoROM cart
-            | (0x40..=0x6F, 0x8000..=0xFFFF)          // ROM banks $40-$6F
-            | (0x70..=0x7D, 0x0000..=0x7FFF)          // SRAM
-            | (0x70..=0x7D, 0x8000..=0xFFFF)          // ROM
-        )
+        match (eb, addr) {
+            (0x7E, _) | (0x7F, _) => true,           // full WRAM
+            (0x00..=0x3F, 0x0000..=0x1FFF) => true,   // WRAM low mirror
+            (0x00..=0x3F, 0x8000..=0xFFFF) => true,    // ROM (both modes)
+            (0x20..=0x3F, 0x6000..=0x7FFF)             // HiROM SRAM
+                if self.cart.map_mode == MapMode::HiROM => true,
+            (0x40..=0x6F, 0x0000..=0x7FFF)             // HiROM: ROM; LoROM: not pure (system mirror)
+                if self.cart.map_mode == MapMode::HiROM => true,
+            (0x40..=0x6F, 0x8000..=0xFFFF) => true,    // ROM (both modes)
+            (0x70..=0x7D, 0x0000..=0x7FFF) => true,    // SRAM (LoROM) or ROM (HiROM) — pure either way
+            (0x70..=0x7D, 0x8000..=0xFFFF) => true,    // ROM
+            _ => false,
+        }
     }
 
     /// Master-cycle multiplier for CPU instructions fetched from (bank, addr).
@@ -201,13 +204,9 @@ impl Bus {
     /// Takes `&mut self` because some register reads have side effects
     /// (flipflops, counters, flag clears).
     ///
-    /// NOTE: This dispatch is LoROM-only. The ROM header parser detects HiROM
-    /// (`MapMode::HiROM` in `rom.rs`), but no HiROM bus routing is implemented.
-    /// HiROM ROMs will be silently mapped incorrectly.
-    ///
-    /// NOTE: Special chip ROMs (SA-1, SuperFX, DSP-1, etc.) are not detected.
-    /// The ROM type byte ($7FD6) is not parsed. Loading a special chip ROM will
-    /// silently treat it as plain LoROM, producing incorrect emulation.
+    /// Supports both LoROM and HiROM memory maps. The key differences:
+    ///   - HiROM puts SRAM at $20-$3F:$6000-$7FFF (LoROM: $70-$7D:$0000-$7FFF)
+    ///   - HiROM maps full 64KB ROM banks at $40-$7D (LoROM: system mirror in low half)
     pub fn read(&mut self, bank: u8, addr: u16) -> u8 {
         let eb = bank & 0x7F; // Mirror $80-$FF → $00-$7F
 
@@ -252,19 +251,39 @@ impl Bus {
             (0x00..=0x3F, 0x4017) => 0, // Player 2 — not implemented
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
             (0x00..=0x3F, 0x4300..=0x437F) => self.dma.read(addr),
-            (0x00..=0x3F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
-
-            // ROM banks $40-$6F — high area is ROM, low area mirrors system area
-            (0x40..=0x6F, 0x0000..=0x7FFF) => self.read(0x00, addr),
-            (0x40..=0x6F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
-
-            // SRAM banks $70-$7D
-            (0x70..=0x7D, 0x0000..=0x7FFF) => {
-                let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
+            // HiROM SRAM: banks $20-$3F, $6000-$7FFF
+            (0x20..=0x3F, 0x6000..=0x7FFF) if self.cart.map_mode == MapMode::HiROM => {
+                let offset = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
                 if offset < self.cart.sram.len() {
                     self.cart.sram[offset]
                 } else {
                     self.open_bus
+                }
+            }
+            (0x00..=0x3F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
+
+            // Banks $40-$6F
+            (0x40..=0x6F, 0x0000..=0x7FFF) => {
+                match self.cart.map_mode {
+                    MapMode::LoROM => self.read(0x00, addr), // mirror system area
+                    MapMode::HiROM => self.cart.read(bank, addr), // full ROM bank
+                }
+            }
+            (0x40..=0x6F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
+
+            // Banks $70-$7D
+            (0x70..=0x7D, 0x0000..=0x7FFF) => {
+                match self.cart.map_mode {
+                    MapMode::LoROM => {
+                        // LoROM SRAM
+                        let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
+                        if offset < self.cart.sram.len() {
+                            self.cart.sram[offset]
+                        } else {
+                            self.open_bus
+                        }
+                    }
+                    MapMode::HiROM => self.cart.read(bank, addr), // ROM
                 }
             }
             (0x70..=0x7D, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
@@ -323,15 +342,35 @@ impl Bus {
             (0x00..=0x3F, 0x4016) => { self.joypad.write_strobe(val); }
             (0x00..=0x3F, 0x4200..=0x42FF) => { self.write_cpu_register(addr, val); }
             (0x00..=0x3F, 0x4300..=0x437F) => { self.dma.write(addr, val); }
-            (0x00..=0x3F, 0x8000..=0xFFFF) => {} // ROM — writes ignored
-
-            (0x40..=0x6F, 0x0000..=0x7FFF) => { self.write(0x00, addr, val); } // Mirror system area
-            (0x40..=0x6F, 0x8000..=0xFFFF) => {} // ROM
-
-            (0x70..=0x7D, 0x0000..=0x7FFF) => { // SRAM
-                let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
+            // HiROM SRAM: banks $20-$3F, $6000-$7FFF
+            (0x20..=0x3F, 0x6000..=0x7FFF) if self.cart.map_mode == MapMode::HiROM => {
+                let offset = ((eb - 0x20) as usize) * 0x2000 + (addr as usize - 0x6000);
                 if offset < self.cart.sram.len() {
                     self.cart.sram[offset] = val;
+                }
+            }
+            (0x00..=0x3F, 0x8000..=0xFFFF) => {} // ROM — writes ignored
+
+            // Banks $40-$6F
+            (0x40..=0x6F, 0x0000..=0x7FFF) => {
+                match self.cart.map_mode {
+                    MapMode::LoROM => self.write(0x00, addr, val), // mirror system area
+                    MapMode::HiROM => {} // ROM — writes ignored
+                }
+            }
+            (0x40..=0x6F, 0x8000..=0xFFFF) => {} // ROM
+
+            // Banks $70-$7D
+            (0x70..=0x7D, 0x0000..=0x7FFF) => {
+                match self.cart.map_mode {
+                    MapMode::LoROM => {
+                        // LoROM SRAM
+                        let offset = ((eb - 0x70) as usize) * 0x8000 + addr as usize;
+                        if offset < self.cart.sram.len() {
+                            self.cart.sram[offset] = val;
+                        }
+                    }
+                    MapMode::HiROM => {} // ROM — writes ignored
                 }
             }
             (0x70..=0x7D, 0x8000..=0xFFFF) => {} // ROM
