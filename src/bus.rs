@@ -81,6 +81,21 @@ pub struct Bus {
     /// `master_clock - last_apu_sync` is the number of master cycles the
     /// APU still owes when a port access forces a sync.
     pub last_apu_sync: u64,
+
+    // ── Per-access bus timing (variable speed) ───────────────
+    //
+    // Accumulated during instruction execution by cpu_read/cpu_write.
+    // Reset at the start of each Cpu::step(). The cycle formula is:
+    //   master_cycles = speed_sum + (opcode_cycles - access_count) × 6
+    // where the remainder (opcode_cycles - access_count) represents
+    // internal CPU operations that always cost 6 master cycles.
+
+    /// Number of bus accesses made by the CPU during the current instruction.
+    pub cpu_access_count: u8,
+
+    /// Sum of master-cycle costs for each bus access during the current
+    /// instruction (6, 8, or 12 per access depending on region + MEMSEL).
+    pub cpu_access_speed_sum: u64,
 }
 
 impl Bus {
@@ -141,6 +156,8 @@ impl Bus {
             current_scanline_target: 0,
             master_clock: 0,
             last_apu_sync: 0,
+            cpu_access_count: 0,
+            cpu_access_speed_sum: 0,
         }
     }
 
@@ -168,25 +185,53 @@ impl Bus {
         }
     }
 
-    /// Master-cycle multiplier for CPU instructions fetched from (bank, addr).
+    /// Master-cycle cost for a single CPU bus access at (bank, addr).
     ///
-    /// NOT YET WIRED IN — all instructions currently use a flat ×6 multiplier
-    /// in `Cpu::step()`. This method exists as infrastructure for when
-    /// per-access timing is implemented with Mesen2 trace validation.
-    /// See `FINISHING_TOUCHES.md` and `docs/ARCHITECTURE.md` issue #4.
-    ///
-    /// The SNES bus has two speeds:
-    ///   6 = fast:  ROM in banks $80-$FF at $8000-$FFFF when MEMSEL bit 0 = 1
-    ///   8 = slow:  everything else (WRAM, I/O, ROM with MEMSEL=0, low banks)
-    #[allow(dead_code)]
+    /// Matches the bsnes/ares speed model:
+    ///   6 = fast:   CPU I/O ($4200-$5FFF), or FastROM ($80+:$8000+ with MEMSEL=1)
+    ///   8 = slow:   WRAM, PPU/APU, ROM, SRAM — everything else
+    ///  12 = xslow:  old-style joypad registers ($4000-$41FF)
     #[inline]
-    pub fn cpu_cycle_speed(&self, bank: u8, _addr: u16) -> u64 {
-        // FastROM: banks $80-$FF, upper half ($8000-$FFFF), MEMSEL enabled
-        if bank >= 0x80 && self.memsel & 0x01 != 0 {
-            6
+    pub fn cpu_cycle_speed(&self, bank: u8, addr: u16) -> u64 {
+        let eb = bank & 0x7F;
+        if addr >= 0x8000 || (eb >= 0x40 && eb <= 0x7D) {
+            // ROM / full-bank area
+            if bank >= 0x80 && self.memsel & 0x01 != 0 { 6 } else { 8 }
+        } else if eb <= 0x3F {
+            // System area
+            match addr {
+                0x4000..=0x41FF => 12, // XSlow (old-style joypad)
+                0x4200..=0x5FFF => 6,  // Fast (CPU I/O, DMA)
+                _ => 8,                // WRAM, PPU, APU, SRAM
+            }
         } else {
-            8
+            8 // $7E-$7F WRAM
         }
+    }
+
+    /// CPU bus read with per-access cycle tracking. Every CPU bus access
+    /// during instruction execution should use this instead of raw `read()`.
+    /// DMA has its own cycle accounting and uses `read()` directly.
+    #[inline]
+    pub fn cpu_read(&mut self, bank: u8, addr: u16) -> u8 {
+        self.cpu_access_count += 1;
+        self.cpu_access_speed_sum += self.cpu_cycle_speed(bank, addr);
+        self.read(bank, addr)
+    }
+
+    /// CPU bus write with per-access cycle tracking.
+    #[inline]
+    pub fn cpu_write(&mut self, bank: u8, addr: u16, val: u8) {
+        self.cpu_access_count += 1;
+        self.cpu_access_speed_sum += self.cpu_cycle_speed(bank, addr);
+        self.write(bank, addr, val);
+    }
+
+    /// Reset per-instruction cycle tracking. Called at the top of `Cpu::step()`.
+    #[inline]
+    pub fn reset_cpu_cycle_tracking(&mut self) {
+        self.cpu_access_count = 0;
+        self.cpu_access_speed_sum = 0;
     }
 
     /// Force-synchronize the APU to the current master clock cycle.

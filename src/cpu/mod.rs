@@ -294,14 +294,18 @@ impl Cpu {
         self.y = 0;
 
         // Reset vector is at $00:FFFC (emulation mode vector).
-        let lo = bus.read(0x00, 0xFFFC) as u16;
-        let hi = bus.read(0x00, 0xFFFD) as u16;
+        let lo = bus.cpu_read(0x00, 0xFFFC) as u16;
+        let hi = bus.cpu_read(0x00, 0xFFFD) as u16;
         self.pc = lo | (hi << 8);
 
         eprintln!("CPU reset → PC = ${:04X}", self.pc);
     }
 
     /// Execute one instruction. Returns the number of master cycles consumed.
+    ///
+    /// Bus accesses are timed per-access: 6 (fast), 8 (slow), or 12 (xslow)
+    /// master cycles depending on the memory region and MEMSEL ($420D).
+    /// Internal CPU operations (non-bus cycles) always cost 6 master cycles.
     pub fn step(&mut self, bus: &mut Bus) -> u64 {
         if self.stopped {
             return 6;
@@ -316,18 +320,24 @@ impl Cpu {
             }
         }
 
+        // Reset per-access cycle tracking for this instruction.
+        bus.reset_cpu_cycle_tracking();
+
         // Handle NMI (non-maskable, highest priority after reset)
         if self.nmi_pending {
             self.nmi_pending = false;
             self.handle_nmi(bus);
-            return 7 * 6;
+            // NMI takes 7 total cycles; bus accesses tracked, rest is internal.
+            let internal = 7u64.saturating_sub(bus.cpu_access_count as u64);
+            return bus.cpu_access_speed_sum + internal * 6;
         }
 
         // Handle IRQ
         if self.irq_pending && !self.p.i {
             self.irq_pending = false;
             self.handle_irq(bus);
-            return 7 * 6;
+            let internal = 7u64.saturating_sub(bus.cpu_access_count as u64);
+            return bus.cpu_access_speed_sum + internal * 6;
         }
 
         // Idle-loop fast path (T10). Gated behind the `idle-skip` Cargo
@@ -377,16 +387,14 @@ impl Cpu {
             );
         }
 
-        // Execute and get cycle count
+        // Execute and get total cycle count (bus + internal).
         let cycles = instructions::execute(self, bus, opcode);
 
-        // Convert CPU cycles to master cycles (×6 for slow bus).
-        // TODO: Variable bus speed (6/8 per access depending on region +
-        // MEMSEL). Requires per-access tracking, not per-instruction — each
-        // bus read/write within an instruction can hit a different speed
-        // region. Needs trace-oracle validation against Mesen2. See
-        // docs/ARCHITECTURE.md remaining issues #4.
-        cycles as u64 * 6
+        // Per-access timing: bus accesses were tracked at their actual speed
+        // (6/8/12 master cycles each). The remaining cycles are internal CPU
+        // operations that always cost 6 master cycles.
+        let internal = (cycles as u64).saturating_sub(bus.cpu_access_count as u64);
+        bus.cpu_access_speed_sum + internal * 6
     }
 
     fn handle_nmi(&mut self, bus: &mut Bus) {
@@ -396,8 +404,8 @@ impl Cpu {
             self.push_byte(bus, self.p.to_byte(true));
             self.p.i = true;
             self.p.d = false;
-            let lo = bus.read(0x00, 0xFFFA) as u16;
-            let hi = bus.read(0x00, 0xFFFB) as u16;
+            let lo = bus.cpu_read(0x00, 0xFFFA) as u16;
+            let hi = bus.cpu_read(0x00, 0xFFFB) as u16;
             self.pc = lo | (hi << 8);
         } else {
             self.push_byte(bus, self.pbr);
@@ -407,8 +415,8 @@ impl Cpu {
             self.p.i = true;
             self.p.d = false;
             self.pbr = 0;
-            let lo = bus.read(0x00, 0xFFEA) as u16;
-            let hi = bus.read(0x00, 0xFFEB) as u16;
+            let lo = bus.cpu_read(0x00, 0xFFEA) as u16;
+            let hi = bus.cpu_read(0x00, 0xFFEB) as u16;
             self.pc = lo | (hi << 8);
         }
     }
@@ -420,8 +428,8 @@ impl Cpu {
             self.push_byte(bus, self.p.to_byte(true) & !0x10); // Clear B flag
             self.p.i = true;
             self.p.d = false;
-            let lo = bus.read(0x00, 0xFFFE) as u16;
-            let hi = bus.read(0x00, 0xFFFF) as u16;
+            let lo = bus.cpu_read(0x00, 0xFFFE) as u16;
+            let hi = bus.cpu_read(0x00, 0xFFFF) as u16;
             self.pc = lo | (hi << 8);
         } else {
             self.push_byte(bus, self.pbr);
@@ -431,8 +439,8 @@ impl Cpu {
             self.p.i = true;
             self.p.d = false;
             self.pbr = 0;
-            let lo = bus.read(0x00, 0xFFEE) as u16;
-            let hi = bus.read(0x00, 0xFFEF) as u16;
+            let lo = bus.cpu_read(0x00, 0xFFEE) as u16;
+            let hi = bus.cpu_read(0x00, 0xFFEF) as u16;
             self.pc = lo | (hi << 8);
         }
     }
@@ -483,7 +491,7 @@ impl Cpu {
 
     /// Fetch a byte from [PBR:PC] and increment PC.
     pub fn fetch_byte(&mut self, bus: &mut Bus) -> u8 {
-        let val = bus.read(self.pbr, self.pc);
+        let val = bus.cpu_read(self.pbr, self.pc);
         self.pc = self.pc.wrapping_add(1);
         val
     }
@@ -505,7 +513,7 @@ impl Cpu {
     // ── Stack operations ────────────────────────────────────────────────
 
     pub fn push_byte(&mut self, bus: &mut Bus, val: u8) {
-        bus.write(0x00, self.sp, val);
+        bus.cpu_write(0x00, self.sp, val);
         self.sp = self.sp.wrapping_sub(1);
         if self.emulation {
             self.sp = 0x0100 | (self.sp & 0xFF);
@@ -522,7 +530,7 @@ impl Cpu {
         if self.emulation {
             self.sp = 0x0100 | (self.sp & 0xFF);
         }
-        bus.read(0x00, self.sp)
+        bus.cpu_read(0x00, self.sp)
     }
 
     pub fn pull_word(&mut self, bus: &mut Bus) -> u16 {

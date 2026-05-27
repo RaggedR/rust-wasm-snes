@@ -756,8 +756,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
         }
         0xD4 => { // PEI (dp) — push indirect
             let a = addr::direct(cpu, bus);
-            let lo = bus.read(a.bank, a.addr) as u16;
-            let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+            let lo = bus.cpu_read(a.bank, a.addr) as u16;
+            let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
             cpu.push_word(bus, lo | (hi << 8));
             base_cycles
         }
@@ -946,8 +946,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
             cpu.dbr = dst_bank;
 
             // Move one byte per "iteration" but loop until C wraps
-            let src = bus.read(src_bank, cpu.x);
-            bus.write(dst_bank, cpu.y, src);
+            let src = bus.cpu_read(src_bank, cpu.x);
+            bus.cpu_write(dst_bank, cpu.y, src);
             cpu.x = cpu.x.wrapping_add(1);
             cpu.y = cpu.y.wrapping_add(1);
             cpu.a = cpu.a.wrapping_sub(1);
@@ -962,8 +962,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
             let src_bank = cpu.fetch_byte(bus);
             cpu.dbr = dst_bank;
 
-            let src = bus.read(src_bank, cpu.x);
-            bus.write(dst_bank, cpu.y, src);
+            let src = bus.cpu_read(src_bank, cpu.x);
+            bus.cpu_write(dst_bank, cpu.y, src);
             cpu.x = cpu.x.wrapping_sub(1);
             cpu.y = cpu.y.wrapping_sub(1);
             cpu.a = cpu.a.wrapping_sub(1);
@@ -1001,8 +1001,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
                 cpu.push_byte(bus, cpu.p.to_byte(true) | 0x10); // Set B flag
                 cpu.p.i = true;
                 cpu.p.d = false;
-                let lo = bus.read(0x00, 0xFFFE) as u16;
-                let hi = bus.read(0x00, 0xFFFF) as u16;
+                let lo = bus.cpu_read(0x00, 0xFFFE) as u16;
+                let hi = bus.cpu_read(0x00, 0xFFFF) as u16;
                 cpu.pc = lo | (hi << 8);
             } else {
                 cpu.push_byte(bus, cpu.pbr);
@@ -1011,8 +1011,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
                 cpu.p.i = true;
                 cpu.p.d = false;
                 cpu.pbr = 0;
-                let lo = bus.read(0x00, 0xFFE6) as u16;
-                let hi = bus.read(0x00, 0xFFE7) as u16;
+                let lo = bus.cpu_read(0x00, 0xFFE6) as u16;
+                let hi = bus.cpu_read(0x00, 0xFFE7) as u16;
                 cpu.pc = lo | (hi << 8);
             }
             base_cycles
@@ -1024,8 +1024,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
                 cpu.push_byte(bus, cpu.p.to_byte(true));
                 cpu.p.i = true;
                 cpu.p.d = false;
-                let lo = bus.read(0x00, 0xFFF4) as u16;
-                let hi = bus.read(0x00, 0xFFF5) as u16;
+                let lo = bus.cpu_read(0x00, 0xFFF4) as u16;
+                let hi = bus.cpu_read(0x00, 0xFFF5) as u16;
                 cpu.pc = lo | (hi << 8);
             } else {
                 cpu.push_byte(bus, cpu.pbr);
@@ -1034,8 +1034,8 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
                 cpu.p.i = true;
                 cpu.p.d = false;
                 cpu.pbr = 0;
-                let lo = bus.read(0x00, 0xFFE4) as u16;
-                let hi = bus.read(0x00, 0xFFE5) as u16;
+                let lo = bus.cpu_read(0x00, 0xFFE4) as u16;
+                let hi = bus.cpu_read(0x00, 0xFFE5) as u16;
                 cpu.pc = lo | (hi << 8);
             }
             base_cycles
@@ -1058,29 +1058,29 @@ pub fn execute(cpu: &mut Cpu, bus: &mut Bus, opcode: u8) -> u8 {
 
 fn read_m(cpu: &Cpu, bus: &mut Bus, a: Addr) -> u16 {
     if cpu.is_m8() {
-        bus.read(a.bank, a.addr) as u16
+        bus.cpu_read(a.bank, a.addr) as u16
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         lo | (hi << 8)
     }
 }
 
 fn write_m(cpu: &Cpu, bus: &mut Bus, a: Addr, val: u16) {
     if cpu.is_m8() {
-        bus.write(a.bank, a.addr, val as u8);
+        bus.cpu_write(a.bank, a.addr, val as u8);
     } else {
-        bus.write(a.bank, a.addr, val as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, val as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
     }
 }
 
 fn read_x(cpu: &Cpu, bus: &mut Bus, a: Addr) -> u16 {
     if cpu.is_x8() {
-        bus.read(a.bank, a.addr) as u16
+        bus.cpu_read(a.bank, a.addr) as u16
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         lo | (hi << 8)
     }
 }
@@ -1128,19 +1128,19 @@ fn sta(cpu: &Cpu, bus: &mut Bus, a: Addr) {
 
 fn stx(cpu: &Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_x8() {
-        bus.write(a.bank, a.addr, cpu.x as u8);
+        bus.cpu_write(a.bank, a.addr, cpu.x as u8);
     } else {
-        bus.write(a.bank, a.addr, cpu.x as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (cpu.x >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, cpu.x as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (cpu.x >> 8) as u8);
     }
 }
 
 fn sty(cpu: &Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_x8() {
-        bus.write(a.bank, a.addr, cpu.y as u8);
+        bus.cpu_write(a.bank, a.addr, cpu.y as u8);
     } else {
-        bus.write(a.bank, a.addr, cpu.y as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (cpu.y >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, cpu.y as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (cpu.y >> 8) as u8);
     }
 }
 
@@ -1362,142 +1362,142 @@ fn bit(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
 
 fn asl_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         cpu.p.c = val & 0x80 != 0;
         let result = val << 1;
-        bus.write(a.bank, a.addr, result);
+        bus.cpu_write(a.bank, a.addr, result);
         cpu.update_nz8(result);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         cpu.p.c = val & 0x8000 != 0;
         let result = val << 1;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
         cpu.update_nz16(result);
     }
 }
 
 fn lsr_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         cpu.p.c = val & 0x01 != 0;
         let result = val >> 1;
-        bus.write(a.bank, a.addr, result);
+        bus.cpu_write(a.bank, a.addr, result);
         cpu.update_nz8(result);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         cpu.p.c = val & 0x0001 != 0;
         let result = val >> 1;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
         cpu.update_nz16(result);
     }
 }
 
 fn rol_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         let carry_in = cpu.p.c as u8;
         cpu.p.c = val & 0x80 != 0;
         let result = (val << 1) | carry_in;
-        bus.write(a.bank, a.addr, result);
+        bus.cpu_write(a.bank, a.addr, result);
         cpu.update_nz8(result);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         let carry_in = cpu.p.c as u16;
         cpu.p.c = val & 0x8000 != 0;
         let result = (val << 1) | carry_in;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
         cpu.update_nz16(result);
     }
 }
 
 fn ror_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         let carry_in = if cpu.p.c { 0x80u8 } else { 0 };
         cpu.p.c = val & 0x01 != 0;
         let result = (val >> 1) | carry_in;
-        bus.write(a.bank, a.addr, result);
+        bus.cpu_write(a.bank, a.addr, result);
         cpu.update_nz8(result);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         let carry_in = if cpu.p.c { 0x8000u16 } else { 0 };
         cpu.p.c = val & 0x0001 != 0;
         let result = (val >> 1) | carry_in;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
         cpu.update_nz16(result);
     }
 }
 
 fn tsb(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         cpu.p.z = (cpu.a as u8) & val == 0;
-        bus.write(a.bank, a.addr, val | cpu.a as u8);
+        bus.cpu_write(a.bank, a.addr, val | cpu.a as u8);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         cpu.p.z = cpu.a & val == 0;
         let result = val | cpu.a;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
     }
 }
 
 fn trb(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr);
+        let val = bus.cpu_read(a.bank, a.addr);
         cpu.p.z = (cpu.a as u8) & val == 0;
-        bus.write(a.bank, a.addr, val & !(cpu.a as u8));
+        bus.cpu_write(a.bank, a.addr, val & !(cpu.a as u8));
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = lo | (hi << 8);
         cpu.p.z = cpu.a & val == 0;
         let result = val & !cpu.a;
-        bus.write(a.bank, a.addr, result as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, result as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (result >> 8) as u8);
     }
 }
 
 fn inc_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr).wrapping_add(1);
-        bus.write(a.bank, a.addr, val);
+        let val = bus.cpu_read(a.bank, a.addr).wrapping_add(1);
+        bus.cpu_write(a.bank, a.addr, val);
         cpu.update_nz8(val);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = (lo | (hi << 8)).wrapping_add(1);
-        bus.write(a.bank, a.addr, val as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, val as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
         cpu.update_nz16(val);
     }
 }
 
 fn dec_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
     if cpu.is_m8() {
-        let val = bus.read(a.bank, a.addr).wrapping_sub(1);
-        bus.write(a.bank, a.addr, val);
+        let val = bus.cpu_read(a.bank, a.addr).wrapping_sub(1);
+        bus.cpu_write(a.bank, a.addr, val);
         cpu.update_nz8(val);
     } else {
-        let lo = bus.read(a.bank, a.addr) as u16;
-        let hi = bus.read(a.bank, a.addr.wrapping_add(1)) as u16;
+        let lo = bus.cpu_read(a.bank, a.addr) as u16;
+        let hi = bus.cpu_read(a.bank, a.addr.wrapping_add(1)) as u16;
         let val = (lo | (hi << 8)).wrapping_sub(1);
-        bus.write(a.bank, a.addr, val as u8);
-        bus.write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
+        bus.cpu_write(a.bank, a.addr, val as u8);
+        bus.cpu_write(a.bank, a.addr.wrapping_add(1), (val >> 8) as u8);
         cpu.update_nz16(val);
     }
 }

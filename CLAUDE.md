@@ -54,8 +54,8 @@ For SMW × 600 frames at default reset state:
 
 | | |
 |---|---|
-| `final_fb_hash` | `54b3eed74f9f8432` |
-| `final_audio_hash` | `62300ecfc4da23e0` |
+| `final_fb_hash` | `961761a48c5d4d85` |
+| `final_audio_hash` | `b0943936c6ddc850` |
 
 Bit-identical across native (x86_64) and browser (wasm32 in Chromium).
 **Any code change that doesn't intentionally alter emulator semantics MUST
@@ -229,5 +229,5 @@ in DevTools before you blame the worker code.
 - Read `docs/OPEN_TASKS.md` for the prioritised queue
 - Run the bench (`cargo run --release --bin bench rom/smw.smc`) — it tells you
   what state the emulator is in via the histogram + hashes
-- The reference values for SMW × 600 frames are sacred: `54b3eed74f9f8432`
-  (FB), `62300ecfc4da23e0` (audio). If they change without intent, stop.
+- The reference values for SMW × 600 frames are sacred: `961761a48c5d4d85`
+  (FB), `b0943936c6ddc850` (audio). If they change without intent, stop.

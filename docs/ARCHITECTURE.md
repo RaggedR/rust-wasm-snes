@@ -97,7 +97,7 @@ Emulator
 **Key types:** `Cpu` (registers + state), `StatusRegister` (8 boolean flags), `Addr` (bank + address pair from addressing modes).
 
 **Known inaccuracies:**
-- Fixed x6 master cycle multiplier (ignores fast/slow bus regions)
+- *(none — variable bus speed now wired in with per-access 6/8/12 model)*
 
 ### PPU (`src/ppu/`)
 
@@ -270,7 +270,7 @@ These were identified in the architecture assessment but too large to apply in t
 
 3. ~~**[S] BCD mode**~~ -- **DONE** (sweep 3). ADC/SBC now handle decimal mode with 8 unit tests.
 
-4. **[M] Variable bus speed** -- Fixed x6 multiplier should be per-region (6/8/12). `cpu_cycle_speed()` infrastructure in place but not wired in.
+4. ~~**[M] Variable bus speed**~~ -- **DONE**. Per-access 6/8/12 model wired in via `Bus::cpu_read()`/`cpu_write()` wrappers.
 
 5. **[M] HDMA cycle accounting** -- HDMA transfers consume zero cycles; real hardware charges ~8 per byte + overhead.
 

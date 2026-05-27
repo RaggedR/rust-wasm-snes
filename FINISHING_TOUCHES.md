@@ -39,18 +39,11 @@ confirming this is intentional, not forgotten.
 These change the CPU/APU timing ratio and will break sacred hashes.
 Must be validated against Mesen2 execution traces before shipping.
 
-### Variable bus speed
-Fixed ×6 multiplier should be 6/8/12 master cycles depending on the
-memory region being accessed and the `MEMSEL` ($420D) fast/slow ROM
-setting. Currently every access costs 6 cycles. `Bus::cpu_cycle_speed()`
-infrastructure is already in place (returns 6 or 8 based on bank +
-MEMSEL) but NOT wired in — per-instruction approximation breaks hashes
-because each bus access within an instruction can hit a different speed
-region. Needs per-access tracking.
-
-**Files:** `src/cpu/mod.rs`, `src/bus.rs`
-**Effort:** 1-2 sessions (per-access model + Mesen2 trace diff)
-**Validate:** trace-compare against Mesen2 for cycle counts
+### ~~Variable bus speed~~ DONE
+Per-access bus timing: 6 (fast/CPU I/O), 8 (slow/WRAM/ROM), 12 (XSlow/$4000-$41FF)
+master cycles per access, matching bsnes/ares speed model. ~97 CPU bus access
+sites converted from flat ×6 to `Bus::cpu_read()`/`cpu_write()` wrappers that
+accumulate actual speed. Internal CPU cycles remain 6 each. Done 2026-05-27.
 
 ### HDMA cycle accounting
 HDMA transfers currently consume zero CPU cycles. Real hardware charges

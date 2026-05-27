@@ -51,24 +51,24 @@ pub fn direct_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
 /// (Direct): indirect through DP+d, result in DBR.
 pub fn direct_indirect(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = direct(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
     Addr { bank: cpu.dbr, addr: lo | (hi << 8) }
 }
 
 /// (Direct,X): indexed indirect. [DP+d+X] → DBR:ptr.
 pub fn direct_x_indirect(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = direct_x(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
     Addr { bank: cpu.dbr, addr: lo | (hi << 8) }
 }
 
 /// (Direct),Y: indirect indexed. [DP+d] → DBR:ptr + Y.
 pub fn direct_indirect_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = direct(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
     let y = if cpu.is_x8() { cpu.y & 0xFF } else { cpu.y };
     let ptr = (lo | (hi << 8)).wrapping_add(y);
     Addr { bank: cpu.dbr, addr: ptr }
@@ -77,18 +77,18 @@ pub fn direct_indirect_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
 /// [Direct]: indirect long. [DP+d] → 3-byte pointer.
 pub fn direct_indirect_long(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = direct(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
-    let bank = bus.read(base.bank, base.addr.wrapping_add(2));
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let bank = bus.cpu_read(base.bank, base.addr.wrapping_add(2));
     Addr { bank, addr: lo | (hi << 8) }
 }
 
 /// [Direct],Y: indirect long indexed. [DP+d] → 24-bit ptr + Y.
 pub fn direct_indirect_long_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = direct(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
-    let bank = bus.read(base.bank, base.addr.wrapping_add(2));
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let bank = bus.cpu_read(base.bank, base.addr.wrapping_add(2));
     let y = if cpu.is_x8() { cpu.y & 0xFF } else { cpu.y };
     let full = (bank as u32) << 16 | (hi as u32) << 8 | lo as u32;
     let effective = full.wrapping_add(y as u32);
@@ -120,8 +120,8 @@ pub fn absolute_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
 /// (Absolute): JMP indirect. [00:addr] → 16-bit pointer. PBR unchanged.
 pub fn absolute_indirect(cpu: &mut Cpu, bus: &mut Bus) -> u16 {
     let addr = cpu.fetch_word(bus);
-    let lo = bus.read(0x00, addr) as u16;
-    let hi = bus.read(0x00, addr.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(0x00, addr) as u16;
+    let hi = bus.cpu_read(0x00, addr.wrapping_add(1)) as u16;
     lo | (hi << 8)
 }
 
@@ -130,17 +130,17 @@ pub fn absolute_x_indirect(cpu: &mut Cpu, bus: &mut Bus) -> u16 {
     let addr = cpu.fetch_word(bus);
     let x = if cpu.is_x8() { cpu.x & 0xFF } else { cpu.x };
     let eff = addr.wrapping_add(x);
-    let lo = bus.read(cpu.pbr, eff) as u16;
-    let hi = bus.read(cpu.pbr, eff.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(cpu.pbr, eff) as u16;
+    let hi = bus.cpu_read(cpu.pbr, eff.wrapping_add(1)) as u16;
     lo | (hi << 8)
 }
 
 /// [Absolute]: JML indirect long. [00:addr] → 24-bit pointer.
 pub fn absolute_indirect_long(cpu: &mut Cpu, bus: &mut Bus) -> (u8, u16) {
     let addr = cpu.fetch_word(bus);
-    let lo = bus.read(0x00, addr) as u16;
-    let hi = bus.read(0x00, addr.wrapping_add(1)) as u16;
-    let bank = bus.read(0x00, addr.wrapping_add(2));
+    let lo = bus.cpu_read(0x00, addr) as u16;
+    let hi = bus.cpu_read(0x00, addr.wrapping_add(1)) as u16;
+    let bank = bus.cpu_read(0x00, addr.wrapping_add(2));
     (bank, lo | (hi << 8))
 }
 
@@ -172,8 +172,8 @@ pub fn stack_relative(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
 /// (Stack Relative),Y: [SP+d] → DBR:ptr + Y.
 pub fn stack_relative_indirect_y(cpu: &mut Cpu, bus: &mut Bus) -> Addr {
     let base = stack_relative(cpu, bus);
-    let lo = bus.read(base.bank, base.addr) as u16;
-    let hi = bus.read(base.bank, base.addr.wrapping_add(1)) as u16;
+    let lo = bus.cpu_read(base.bank, base.addr) as u16;
+    let hi = bus.cpu_read(base.bank, base.addr.wrapping_add(1)) as u16;
     let y = if cpu.is_x8() { cpu.y & 0xFF } else { cpu.y };
     let ptr = (lo | (hi << 8)).wrapping_add(y);
     Addr { bank: cpu.dbr, addr: ptr }

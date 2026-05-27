@@ -51,8 +51,8 @@ jobs:
       # Reference hashes captured from a known-good run. Update these
       # only when an intentional emulator change shifts deterministic
       # output (and document why in the commit message).
-      EXPECTED_FB_HASH: "54b3eed74f9f8432"
-      EXPECTED_AUDIO_HASH: "62300ecfc4da23e0"
+      EXPECTED_FB_HASH: "961761a48c5d4d85"
+      EXPECTED_AUDIO_HASH: "b0943936c6ddc850"
       BENCH_FRAMES: "600"
     steps:
       - uses: actions/checkout@v4
