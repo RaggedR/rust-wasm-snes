@@ -328,6 +328,13 @@ impl Bus {
             (0x00..=0x3F, 0x4017) => 0,
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
             (0x00..=0x3F, 0x4300..=0x437F) => {
+                // During DMA execution, bus.dma is temporarily extracted via
+                // std::mem::take (split-borrow pattern), so these registers
+                // would read as zeroed defaults. The debug_assert catches this
+                // in debug builds. In release, games that chain DMA configs
+                // (e.g. configuring one channel by reading another mid-transfer)
+                // would silently read wrong values. This is a known limitation
+                // of the split-borrow pattern.
                 debug_assert!(!self.dma_active,
                     "DMA register read ${:04X} while DMA is executing — \
                      bus.dma is temporarily extracted via std::mem::take", addr);
@@ -423,6 +430,13 @@ impl Bus {
             (0x00..=0x3F, 0x4016) => { self.joypad.write_strobe(val); }
             (0x00..=0x3F, 0x4200..=0x42FF) => { self.write_cpu_register(addr, val); }
             (0x00..=0x3F, 0x4300..=0x437F) => {
+                // During DMA execution, bus.dma is temporarily extracted via
+                // std::mem::take (split-borrow pattern), so writes here would
+                // hit a zeroed placeholder and be silently lost. The debug_assert
+                // catches this in debug builds. In release, games that chain DMA
+                // configs (e.g. writing one channel from another mid-transfer)
+                // would silently write to the wrong object. This is a known
+                // limitation of the split-borrow pattern.
                 debug_assert!(!self.dma_active,
                     "DMA register write ${:04X} while DMA is executing — \
                      bus.dma is temporarily extracted via std::mem::take", addr);

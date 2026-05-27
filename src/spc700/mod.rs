@@ -667,6 +667,15 @@ impl Apu {
         self.dsp_counter = u32::from_le_bytes(take!(4).try_into().unwrap());
 
         let nsamp = u32::from_le_bytes(take!(4).try_into().unwrap()) as usize;
+        // Guard against crafted snapshots claiming enormous sample counts.
+        // Each sample is 2 bytes (i16); 64 MB / 2 = 33_554_432 samples max.
+        // Matches the 64 MB ceiling pattern used by r_bytes_vec in snapshot.rs.
+        const MAX_SAMPLES: usize = 64 * 1024 * 1024 / 2;
+        if nsamp > MAX_SAMPLES {
+            return Err(format!(
+                "apu snapshot: sample count {} exceeds 64 MB limit", nsamp
+            ));
+        }
         self.sample_buffer.clear();
         self.sample_buffer.reserve(nsamp);
         for _ in 0..nsamp {

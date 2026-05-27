@@ -539,17 +539,9 @@ impl Cpu {
         w_u16(out, self.pc);
         w_u8(out, self.pbr);
         w_u8(out, self.dbr);
-        // Pack StatusRegister into one byte
-        let mut pb = 0u8;
-        if self.p.n { pb |= 0x80; }
-        if self.p.v { pb |= 0x40; }
-        if self.p.m { pb |= 0x20; }
-        if self.p.x { pb |= 0x10; }
-        if self.p.d { pb |= 0x08; }
-        if self.p.i { pb |= 0x04; }
-        if self.p.z { pb |= 0x02; }
-        if self.p.c { pb |= 0x01; }
-        out.push(pb);
+        // Pack StatusRegister using to_byte() which handles emulation-mode
+        // semantics (bit 5 = 1 forced, bit 4 = break flag).
+        w_u8(out, self.p.to_byte(self.emulation));
         w_bool(out, self.emulation);
         w_u64(out, self.cycles);
         w_bool(out, self.nmi_pending);
@@ -568,18 +560,14 @@ impl Cpu {
         self.pc = r_u16(r)?;
         self.pbr = r_u8(r)?;
         self.dbr = r_u8(r)?;
-        let b = r_u8(r)?;
-        self.p = StatusRegister {
-            n: b & 0x80 != 0,
-            v: b & 0x40 != 0,
-            m: b & 0x20 != 0,
-            x: b & 0x10 != 0,
-            d: b & 0x08 != 0,
-            i: b & 0x04 != 0,
-            z: b & 0x02 != 0,
-            c: b & 0x01 != 0,
-        };
+        // Read emulation flag first (it was written after P, but we need it
+        // to correctly unpack P). Peek ahead: P byte is at current position,
+        // emulation bool is 1 byte after that.
+        let p_byte = r_u8(r)?;
         self.emulation = r_bool(r)?;
+        // Unpack StatusRegister using from_byte() which handles emulation-mode
+        // semantics (forces M=1, X=1 when emulation=true).
+        self.p.from_byte(p_byte, self.emulation);
         self.cycles = r_u64(r)?;
         self.nmi_pending = r_bool(r)?;
         self.irq_pending = r_bool(r)?;

@@ -494,6 +494,193 @@ impl Ppu {
 
     }
 
+    // ── Snapshot serialization ──────────────────────────────────────
+
+    pub fn snapshot_write(&self, out: &mut Vec<u8>) {
+        use crate::snapshot::*;
+        // VRAM, OAM, CGRAM
+        w_bytes(out, &*self.vram);
+        w_bytes(out, &*self.oam);
+        w_bytes(out, &*self.cgram);
+        // Display control
+        w_u8(out, self.inidisp);
+        w_u8(out, self.bgmode);
+        w_u8(out, self.mosaic);
+        // BG layers
+        for bg in &self.bg {
+            w_u16(out, bg.tilemap_addr);
+            w_u8(out, bg.tilemap_size);
+            w_u16(out, bg.chr_addr);
+            w_u16(out, bg.hscroll);
+            w_u16(out, bg.vscroll);
+            w_bool(out, bg.tile_size);
+        }
+        // VRAM access
+        w_u16(out, self.vram_addr);
+        w_u8(out, self.vram_increment);
+        w_u16(out, self.vram_prefetch);
+        w_u8(out, self.vram_remap);
+        // CGRAM access
+        w_u8(out, self.cgram_addr);
+        w_u8(out, self.cgram_latch);
+        w_bool(out, self.cgram_flipflop);
+        // OAM access
+        w_u16(out, self.oam_addr);
+        w_u16(out, self.oam_internal_addr);
+        w_u8(out, self.oam_latch);
+        w_bool(out, self.oam_flipflop);
+        w_u8(out, self.obj_size);
+        w_u16(out, self.obj_base);
+        w_u16(out, self.obj_name_select);
+        // Scroll latch
+        w_u8(out, self.scroll_latch);
+        w_u8(out, self.bghofs_latch);
+        // Mode 7
+        w_i16(out, self.m7a);
+        w_i16(out, self.m7b);
+        w_i16(out, self.m7c);
+        w_i16(out, self.m7d);
+        w_i16(out, self.m7x);
+        w_i16(out, self.m7y);
+        w_u8(out, self.m7_latch);
+        w_i16(out, self.m7_hofs);
+        w_i16(out, self.m7_vofs);
+        // Screen designation
+        w_u8(out, self.tm);
+        w_u8(out, self.ts);
+        w_u8(out, self.tmw);
+        w_u8(out, self.tsw);
+        // Color math
+        w_u8(out, self.cgwsel);
+        w_u8(out, self.cgadsub);
+        w_u8(out, self.fixed_color_r);
+        w_u8(out, self.fixed_color_g);
+        w_u8(out, self.fixed_color_b);
+        // Window
+        w_u8(out, self.w1_left);
+        w_u8(out, self.w1_right);
+        w_u8(out, self.w2_left);
+        w_u8(out, self.w2_right);
+        w_u8(out, self.wbglog);
+        w_u8(out, self.wobjlog);
+        w_u8(out, self.w12sel);
+        w_u8(out, self.w34sel);
+        w_u8(out, self.wobjsel);
+        // Rendering state
+        w_u16(out, self.scanline);
+        // Frame buffer as raw bytes (256×224×4 = 229376 bytes)
+        let fb_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self.frame_buffer.as_ptr() as *const u8,
+                self.frame_buffer.len() * 4,
+            )
+        };
+        w_bytes(out, fb_bytes);
+        // Status
+        w_bool(out, self.latch_hv);
+        w_u16(out, self.ophct);
+        w_u16(out, self.opvct);
+        w_bool(out, self.ophct_flipflop);
+        w_bool(out, self.opvct_flipflop);
+    }
+
+    pub fn snapshot_read(&mut self, r: &mut &[u8]) -> Result<(), String> {
+        use crate::snapshot::*;
+        // VRAM, OAM, CGRAM
+        r_bytes_into(r, &mut *self.vram)?;
+        r_bytes_into(r, &mut *self.oam)?;
+        r_bytes_into(r, &mut *self.cgram)?;
+        // Display control
+        self.inidisp = r_u8(r)?;
+        self.bgmode = r_u8(r)?;
+        self.mosaic = r_u8(r)?;
+        // BG layers
+        for bg in &mut self.bg {
+            bg.tilemap_addr = r_u16(r)?;
+            bg.tilemap_size = r_u8(r)?;
+            bg.chr_addr = r_u16(r)?;
+            bg.hscroll = r_u16(r)?;
+            bg.vscroll = r_u16(r)?;
+            bg.tile_size = r_bool(r)?;
+        }
+        // VRAM access
+        self.vram_addr = r_u16(r)?;
+        self.vram_increment = r_u8(r)?;
+        self.vram_prefetch = r_u16(r)?;
+        self.vram_remap = r_u8(r)?;
+        // CGRAM access
+        self.cgram_addr = r_u8(r)?;
+        self.cgram_latch = r_u8(r)?;
+        self.cgram_flipflop = r_bool(r)?;
+        // OAM access
+        self.oam_addr = r_u16(r)?;
+        self.oam_internal_addr = r_u16(r)?;
+        self.oam_latch = r_u8(r)?;
+        self.oam_flipflop = r_bool(r)?;
+        self.obj_size = r_u8(r)?;
+        self.obj_base = r_u16(r)?;
+        self.obj_name_select = r_u16(r)?;
+        // Scroll latch
+        self.scroll_latch = r_u8(r)?;
+        self.bghofs_latch = r_u8(r)?;
+        // Mode 7
+        self.m7a = r_i16(r)?;
+        self.m7b = r_i16(r)?;
+        self.m7c = r_i16(r)?;
+        self.m7d = r_i16(r)?;
+        self.m7x = r_i16(r)?;
+        self.m7y = r_i16(r)?;
+        self.m7_latch = r_u8(r)?;
+        self.m7_hofs = r_i16(r)?;
+        self.m7_vofs = r_i16(r)?;
+        // Screen designation
+        self.tm = r_u8(r)?;
+        self.ts = r_u8(r)?;
+        self.tmw = r_u8(r)?;
+        self.tsw = r_u8(r)?;
+        // Color math
+        self.cgwsel = r_u8(r)?;
+        self.cgadsub = r_u8(r)?;
+        self.fixed_color_r = r_u8(r)?;
+        self.fixed_color_g = r_u8(r)?;
+        self.fixed_color_b = r_u8(r)?;
+        // Window
+        self.w1_left = r_u8(r)?;
+        self.w1_right = r_u8(r)?;
+        self.w2_left = r_u8(r)?;
+        self.w2_right = r_u8(r)?;
+        self.wbglog = r_u8(r)?;
+        self.wobjlog = r_u8(r)?;
+        self.w12sel = r_u8(r)?;
+        self.w34sel = r_u8(r)?;
+        self.wobjsel = r_u8(r)?;
+        // Rendering state
+        self.scanline = r_u16(r)?;
+        // Frame buffer
+        let fb_bytes_vec = r_bytes_vec(r)?;
+        let expected_len = self.frame_buffer.len() * 4;
+        if fb_bytes_vec.len() != expected_len {
+            return Err(format!(
+                "snapshot: framebuffer size mismatch (expected {}, got {})",
+                expected_len, fb_bytes_vec.len()
+            ));
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                fb_bytes_vec.as_ptr(),
+                self.frame_buffer.as_mut_ptr() as *mut u8,
+                expected_len,
+            );
+        }
+        // Status
+        self.latch_hv = r_bool(r)?;
+        self.ophct = r_u16(r)?;
+        self.opvct = r_u16(r)?;
+        self.ophct_flipflop = r_bool(r)?;
+        self.opvct_flipflop = r_bool(r)?;
+        Ok(())
+    }
+
     /// Handle a read from a PPU register ($2134-$213F).
     pub fn read_register(&mut self, addr: u16) -> u8 {
         match addr {
