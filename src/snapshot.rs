@@ -27,8 +27,6 @@
 use crate::Emulator;
 use crate::cpu::Cpu;
 use crate::bus::Bus;
-use crate::joypad::Joypad;
-use crate::ppu::Ppu;
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
 /// V4: APU field `cycle_frac: u32` replaced with `master_cycles_total: u64`
 ///     (distributive catch_up fix — 4 bytes wider).
@@ -101,137 +99,12 @@ pub(crate) fn r_bytes_vec(r: &mut &[u8]) -> Result<Vec<u8>, String> {
 fn write_cpu(out: &mut Vec<u8>, cpu: &Cpu) { cpu.snapshot_write(out); }
 fn read_cpu(r: &mut &[u8], cpu: &mut Cpu) -> Result<(), String> { cpu.snapshot_read(r) }
 
-// ─── DMA ────────────────────────────────────────────────────────────────
-// Serialization lives on Dma::snapshot_write / Dma::snapshot_read in src/dma.rs.
-
-fn write_dma(out: &mut Vec<u8>, dma: &crate::dma::Dma) { dma.snapshot_write(out); }
-fn read_dma(r: &mut &[u8], dma: &mut crate::dma::Dma) -> Result<(), String> { dma.snapshot_read(r) }
-
-// ─── Joypad ─────────────────────────────────────────────────────────────
-
-fn write_joypad(out: &mut Vec<u8>, j: &Joypad) {
-    // Joypad has private fields — use its public snapshot interface.
-    // (Methods added below in `Joypad::snapshot_state`.)
-    let blob = j.snapshot_state();
-    w_bytes(out, &blob);
-}
-fn read_joypad(r: &mut &[u8], j: &mut Joypad) -> Result<(), String> {
-    let blob = r_bytes_vec(r)?;
-    j.restore_state(&blob)
-}
-
-// ─── PPU ────────────────────────────────────────────────────────────────
-// Serialization logic lives on Ppu::snapshot_write / Ppu::snapshot_read
-// and BgLayer::snapshot_write / BgLayer::snapshot_read in src/ppu/mod.rs.
-
-fn write_ppu(out: &mut Vec<u8>, ppu: &Ppu) {
-    ppu.snapshot_write(out);
-}
-fn read_ppu(r: &mut &[u8], ppu: &mut Ppu) -> Result<(), String> {
-    ppu.snapshot_read(r)
-}
-
 // ─── Bus ────────────────────────────────────────────────────────────────
+// Serialization lives on Bus::snapshot_write / Bus::snapshot_read in src/bus.rs.
+// Bus internally delegates to Ppu, Dma, Joypad, and Apu snapshot methods.
 
-fn write_bus(out: &mut Vec<u8>, bus: &Bus) {
-    // 128KB WRAM
-    w_bytes(out, &*bus.wram);
-
-    // SRAM (cartridge — only mutable cart state we snapshot; ROM excluded).
-    w_bytes(out, &bus.cart.sram);
-
-    // CPU internal registers
-    w_u8(out, bus.nmitimen);
-    w_u16(out, bus.htime);
-    w_u16(out, bus.vtime);
-    w_u8(out, bus.hdmaen);
-    w_u8(out, bus.memsel);
-
-    // Math hardware
-    w_u8(out, bus.wrmpya);
-    w_u8(out, bus.wrmpyb);
-    w_u16(out, bus.wrdiv);
-    w_u8(out, bus.wrdivb);
-    w_u16(out, bus.rddiv);
-    w_u16(out, bus.rdmpy);
-
-    // WRAM data port
-    w_u32(out, bus.wram_addr);
-
-    // Timing/status
-    w_bool(out, bus.vblank);
-    w_bool(out, bus.hblank);
-    w_bool(out, bus.nmi_flag);
-    w_bool(out, bus.irq_flag);
-    w_bool(out, bus.auto_joypad_busy);
-    w_u32(out, bus.auto_joypad_timer);
-    w_u16(out, bus.auto_joypad_result);
-    w_u8(out, bus.open_bus);
-    w_u64(out, bus.pending_dma_cycles);
-    w_u8(out, bus.last_write_bank);
-    w_u16(out, bus.last_write_pc);
-    // master_clock and last_apu_sync are transient JIT sync state, reset
-    // every scanline — no need to persist across save/restore.
-
-    // Sub-components
-    write_ppu(out, &bus.ppu);
-    write_dma(out, &bus.dma);
-    write_joypad(out, &bus.joypad);
-
-    // APU is large — delegate to its own method.
-    let apu_blob = bus.apu.snapshot();
-    w_bytes(out, &apu_blob);
-}
-fn read_bus(r: &mut &[u8], bus: &mut Bus) -> Result<(), String> {
-    r_bytes_into(r, &mut *bus.wram)?;
-
-    let sram = r_bytes_vec(r)?;
-    if sram.len() != bus.cart.sram.len() {
-        return Err(format!(
-            "snapshot: SRAM size mismatch (expected {}, got {})",
-            bus.cart.sram.len(), sram.len()
-        ));
-    }
-    bus.cart.sram.copy_from_slice(&sram);
-
-    bus.nmitimen = r_u8(r)?;
-    bus.htime = r_u16(r)?;
-    bus.vtime = r_u16(r)?;
-    bus.hdmaen = r_u8(r)?;
-    bus.memsel = r_u8(r)?;
-
-    bus.wrmpya = r_u8(r)?;
-    bus.wrmpyb = r_u8(r)?;
-    bus.wrdiv = r_u16(r)?;
-    bus.wrdivb = r_u8(r)?;
-    bus.rddiv = r_u16(r)?;
-    bus.rdmpy = r_u16(r)?;
-
-    bus.wram_addr = r_u32(r)?;
-
-    bus.vblank = r_bool(r)?;
-    bus.hblank = r_bool(r)?;
-    bus.nmi_flag = r_bool(r)?;
-    bus.irq_flag = r_bool(r)?;
-    bus.auto_joypad_busy = r_bool(r)?;
-    bus.auto_joypad_timer = r_u32(r)?;
-    bus.auto_joypad_result = r_u16(r)?;
-    bus.open_bus = r_u8(r)?;
-    bus.pending_dma_cycles = r_u64(r)?;
-    bus.last_write_bank = r_u8(r)?;
-    bus.last_write_pc = r_u16(r)?;
-    // master_clock and last_apu_sync are transient — not persisted.
-    // Initialized to cpu.cycles in restore_state() (not here, since we
-    // don't have access to cpu.cycles in read_bus).
-
-    read_ppu(r, &mut bus.ppu)?;
-    read_dma(r, &mut bus.dma)?;
-    read_joypad(r, &mut bus.joypad)?;
-
-    let apu_blob = r_bytes_vec(r)?;
-    bus.apu.restore(&apu_blob)?;
-    Ok(())
-}
+fn write_bus(out: &mut Vec<u8>, bus: &Bus) { bus.snapshot_write(out); }
+fn read_bus(r: &mut &[u8], bus: &mut Bus) -> Result<(), String> { bus.snapshot_read(r) }
 
 // ─── Free-function entry points ─────────────────────────────────────────
 //

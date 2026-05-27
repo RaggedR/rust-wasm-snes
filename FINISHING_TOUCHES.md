@@ -78,14 +78,12 @@ Added `Ppu::set_scanline()`, all callers updated. Done 2026-05-27.
 235 lines of DMA logic extracted from `bus.rs` to `dma.rs` using
 `std::mem::take` split-borrow pattern. Done 2026-05-27.
 
-### Pervasive `pub` fields — partially done
-Snapshot serialization moved into each struct (Ppu, Cpu, Dma, Joypad,
-Apu all have snapshot_write/snapshot_read methods). `Cpu::stopped`
-and `Cpu::waiting` privatized. Remaining: Bus fields still accessed
-directly by snapshot.rs's write_bus/read_bus (~20 fields).
-
-**Files:** `src/bus.rs`, `src/snapshot.rs`
-**Effort:** 1 session
+### ~~Pervasive `pub` fields~~ DONE
+All snapshot serialization moved into each struct (Bus, Ppu, Cpu, Dma,
+Joypad, Apu). `snapshot.rs` is now thin wrappers. Privatized:
+`Cpu::stopped`, `Cpu::waiting`, `Bus::wrmpya/b`, `Bus::wrdiv/b`,
+`Bus::rddiv`, `Bus::rdmpy`, `Bus::wram_addr`, `Bus::open_bus`.
+Done 2026-05-27.
 
 ---
 

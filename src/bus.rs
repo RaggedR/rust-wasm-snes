@@ -29,16 +29,16 @@ pub struct Bus {
     pub hdmaen: u8,      // $420C — HDMA channel enable
     pub memsel: u8,      // $420D — FastROM select
 
-    // ── Math hardware ─────────────────────────────────────
-    pub wrmpya: u8,      // $4202
-    pub wrmpyb: u8,      // $4203
-    pub wrdiv: u16,      // $4204-$4205
-    pub wrdivb: u8,      // $4206
-    pub rddiv: u16,      // $4214-$4215 (division result)
-    pub rdmpy: u16,      // $4216-$4217 (multiplication result)
+    // ── Math hardware (internal — accessed only by register handlers + snapshot) ──
+    wrmpya: u8,      // $4202
+    wrmpyb: u8,      // $4203
+    wrdiv: u16,      // $4204-$4205
+    wrdivb: u8,      // $4206
+    rddiv: u16,      // $4214-$4215 (division result)
+    rdmpy: u16,      // $4216-$4217 (multiplication result)
 
-    // ── WRAM data port ────────────────────────────────────
-    pub wram_addr: u32,  // $2181-$2183 (17-bit)
+    // ── WRAM data port (internal — accessed only by register handlers + snapshot) ──
+    wram_addr: u32,  // $2181-$2183 (17-bit)
 
     // ── Timing/status ─────────────────────────────────────
     pub vblank: bool,
@@ -55,7 +55,7 @@ pub struct Bus {
     /// real hardware where the result is frozen at VBlank poll time.
     pub auto_joypad_result: u16,
 
-    pub open_bus: u8,
+    open_bus: u8,
 
     /// Pending DMA cycles to add to the CPU cycle count.
     pub pending_dma_cycles: u64,
@@ -574,5 +574,94 @@ impl Bus {
         crate::dma::hdma_run_scanline(&mut dma, self);
         self.dma_active = false;
         self.dma = dma;
+    }
+
+    // ── Snapshot serialization ──────────────────────────────────────
+
+    pub fn snapshot_write(&self, out: &mut Vec<u8>) {
+        use crate::snapshot::*;
+        // 128KB WRAM
+        w_bytes(out, &*self.wram);
+        // SRAM
+        w_bytes(out, &self.cart.sram);
+        // CPU internal registers
+        w_u8(out, self.nmitimen);
+        w_u16(out, self.htime);
+        w_u16(out, self.vtime);
+        w_u8(out, self.hdmaen);
+        w_u8(out, self.memsel);
+        // Math hardware
+        w_u8(out, self.wrmpya);
+        w_u8(out, self.wrmpyb);
+        w_u16(out, self.wrdiv);
+        w_u8(out, self.wrdivb);
+        w_u16(out, self.rddiv);
+        w_u16(out, self.rdmpy);
+        // WRAM data port
+        w_u32(out, self.wram_addr);
+        // Timing/status
+        w_bool(out, self.vblank);
+        w_bool(out, self.hblank);
+        w_bool(out, self.nmi_flag);
+        w_bool(out, self.irq_flag);
+        w_bool(out, self.auto_joypad_busy);
+        w_u32(out, self.auto_joypad_timer);
+        w_u16(out, self.auto_joypad_result);
+        w_u8(out, self.open_bus);
+        w_u64(out, self.pending_dma_cycles);
+        w_u8(out, self.last_write_bank);
+        w_u16(out, self.last_write_pc);
+        // master_clock/last_apu_sync are transient — not persisted.
+        // Sub-components
+        self.ppu.snapshot_write(out);
+        self.dma.snapshot_write(out);
+        let jblob = self.joypad.snapshot_state();
+        w_bytes(out, &jblob);
+        let apu_blob = self.apu.snapshot();
+        w_bytes(out, &apu_blob);
+    }
+
+    pub fn snapshot_read(&mut self, r: &mut &[u8]) -> Result<(), String> {
+        use crate::snapshot::*;
+        r_bytes_into(r, &mut *self.wram)?;
+        let sram = r_bytes_vec(r)?;
+        if sram.len() != self.cart.sram.len() {
+            return Err(format!(
+                "snapshot: SRAM size mismatch (expected {}, got {})",
+                self.cart.sram.len(), sram.len()
+            ));
+        }
+        self.cart.sram.copy_from_slice(&sram);
+        self.nmitimen = r_u8(r)?;
+        self.htime = r_u16(r)?;
+        self.vtime = r_u16(r)?;
+        self.hdmaen = r_u8(r)?;
+        self.memsel = r_u8(r)?;
+        self.wrmpya = r_u8(r)?;
+        self.wrmpyb = r_u8(r)?;
+        self.wrdiv = r_u16(r)?;
+        self.wrdivb = r_u8(r)?;
+        self.rddiv = r_u16(r)?;
+        self.rdmpy = r_u16(r)?;
+        self.wram_addr = r_u32(r)?;
+        self.vblank = r_bool(r)?;
+        self.hblank = r_bool(r)?;
+        self.nmi_flag = r_bool(r)?;
+        self.irq_flag = r_bool(r)?;
+        self.auto_joypad_busy = r_bool(r)?;
+        self.auto_joypad_timer = r_u32(r)?;
+        self.auto_joypad_result = r_u16(r)?;
+        self.open_bus = r_u8(r)?;
+        self.pending_dma_cycles = r_u64(r)?;
+        self.last_write_bank = r_u8(r)?;
+        self.last_write_pc = r_u16(r)?;
+        // Sub-components
+        self.ppu.snapshot_read(r)?;
+        self.dma.snapshot_read(r)?;
+        let jblob = r_bytes_vec(r)?;
+        self.joypad.restore_state(&jblob)?;
+        let apu_blob = r_bytes_vec(r)?;
+        self.apu.restore(&apu_blob)?;
+        Ok(())
     }
 }
