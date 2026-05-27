@@ -318,7 +318,7 @@ impl Cpu {
         if self.nmi_pending {
             self.nmi_pending = false;
             self.handle_nmi(bus);
-            return 7 * 6; // ~7 cycles × 6 master cycles each
+            return 7 * 6;
         }
 
         // Handle IRQ
@@ -378,7 +378,12 @@ impl Cpu {
         // Execute and get cycle count
         let cycles = instructions::execute(self, bus, opcode);
 
-        // Convert CPU cycles to master cycles (×6 for slow bus, simplified)
+        // Convert CPU cycles to master cycles (×6 for slow bus).
+        // TODO: Variable bus speed (6/8 per access depending on region +
+        // MEMSEL). Requires per-access tracking, not per-instruction — each
+        // bus read/write within an instruction can hit a different speed
+        // region. Needs trace-oracle validation against Mesen2. See
+        // docs/ARCHITECTURE.md remaining issues #4.
         cycles as u64 * 6
     }
 

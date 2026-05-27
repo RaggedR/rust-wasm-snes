@@ -147,6 +147,26 @@ impl Bus {
         )
     }
 
+    /// Master-cycle multiplier for CPU instructions fetched from (bank, addr).
+    ///
+    /// The SNES bus has two speeds:
+    ///   6 = fast:  ROM in banks $80-$FF at $8000-$FFFF when MEMSEL bit 0 = 1
+    ///   8 = slow:  everything else (WRAM, I/O, ROM with MEMSEL=0, low banks)
+    ///
+    /// This is a per-instruction approximation: the real hardware applies
+    /// the speed per bus access (each read/write within an instruction may
+    /// hit a different region). The per-instruction model is standard for
+    /// emulators that don't track individual bus accesses.
+    #[inline]
+    pub fn cpu_cycle_speed(&self, bank: u8, _addr: u16) -> u64 {
+        // FastROM: banks $80-$FF, upper half ($8000-$FFFF), MEMSEL enabled
+        if bank >= 0x80 && self.memsel & 0x01 != 0 {
+            6
+        } else {
+            8
+        }
+    }
+
     /// Force-synchronize the APU to the current master clock cycle.
     ///
     /// Called on CPU reads/writes to the APU I/O ports ($2140-$2143) so the
