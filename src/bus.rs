@@ -184,6 +184,14 @@ impl Bus {
         let delta = self.master_clock - self.last_apu_sync;
         if delta > 0 {
             self.apu.catch_up(delta as u32);
+            // Patch the CatchUp event's master_cycle field — catch_up doesn't
+            // have access to master_clock, but sync_apu does.
+            #[cfg(feature = "apu-trace")]
+            if let Some(crate::spc700::events::ApuEvent::CatchUp { master_cycle, .. }) =
+                self.apu.bus.event_log.events.last_mut()
+            {
+                *master_cycle = self.master_clock;
+            }
             self.last_apu_sync = self.master_clock;
         }
     }

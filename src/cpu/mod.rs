@@ -263,7 +263,9 @@ impl Cpu {
             // We can't undo the catch_up, but we stop skipping immediately
             // so the CPU resumes normal execution and reads the port.
             self.idle_skip_aborted += 1;
-            self.idle_skip_cycles += skip;
+            // Don't count aborted skips in idle_skip_cycles — those cycles
+            // were spent on APU catch_up but the CPU didn't actually save
+            // any work (it resumes immediately).
             return Some(0);
         }
 
