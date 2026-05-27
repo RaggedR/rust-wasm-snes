@@ -214,6 +214,10 @@ impl Emulator {
             // V/H-count IRQ: fires once when position matches, cleared by $4211 read.
             // H-IRQ uses dot position within the scanline (0-339). We compute
             // this from the cycle offset: dot = offset * 340 / 1364.
+            // Note: htime=0 fires on the first instruction of each scanline.
+            // This is correct — games that enable H-IRQ must read $4211 to
+            // clear irq_flag, otherwise it stays set and the one-shot guard
+            // (!irq_flag) prevents re-firing until the next scanline.
             let irq_mode = (self.bus.nmitimen >> 4) & 0x03;
             let scanline_start = self.cpu.cycles;
 

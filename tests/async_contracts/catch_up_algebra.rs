@@ -72,7 +72,7 @@ fn catch_up_monotone_cumulative() {
 fn catch_up_approximate_associativity() {
     // catch_up(a) + catch_up(b) vs catch_up(a+b) should produce similar
     // total SPC cycles. The difference is bounded by one SPC instruction
-    // (max 8 cycles) due to the cycle_debt mechanism.
+    // (max 8 cycles) due to the absolute cycle_target mechanism.
     let total_master = 10000u32;
 
     // Path A: one big call
@@ -119,10 +119,10 @@ fn catch_up_fractional_accumulator_wraps_correctly() {
 }
 
 #[test]
-fn run_cycles_debt_mechanism_prevents_amplification() {
-    // When run_cycles is called with 1 cycle many times, the debt mechanism
-    // should prevent executing a full instruction per call. Total cycles
-    // after N calls of run_cycles(1) should be similar to run_cycles(N).
+fn run_cycles_target_mechanism_prevents_amplification() {
+    // When run_cycles is called with 1 cycle many times, the cycle_target
+    // mechanism should prevent executing a full instruction per call. Total
+    // cycles after N calls of run_cycles(1) should be similar to run_cycles(N).
     let n = 100u32;
 
     let mut apu_single = fresh_apu();

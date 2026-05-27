@@ -527,6 +527,9 @@ pub fn restore_state(
     // Initialize transient JIT sync fields to cpu.cycles (not 0) to prevent
     // a latent over-credit bug if any caller accesses APU ports between
     // restore_state and the first scanline's reset of these fields.
+    // Safe because the frame loop resets both at each scanline start;
+    // setting to cpu.cycles here ensures delta=0 during any access before
+    // that first reset.
     bus.master_clock = cpu.cycles;
     bus.last_apu_sync = cpu.cycles;
     *frame_count = r_u64(&mut r)?;

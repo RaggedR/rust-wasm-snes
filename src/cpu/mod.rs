@@ -242,7 +242,7 @@ impl Cpu {
         // Check if the APU wrote to its output ports during the skip — if so,
         // the CPU would normally read those ports between loop iterations
         // (handshake protocol), and skipping those reads may corrupt comms.
-        bus.apu.bus.ports_written_during_run = false;
+        bus.apu.bus.take_ports_written(); // clear before catch_up
         bus.apu.catch_up(skip as u32);
         self.cycles += skip;
         // Update last_apu_sync to match the new master_clock that the frame
@@ -250,18 +250,20 @@ impl Cpu {
         // sync_apu() would see a delta of `skip` and double-credit the APU.
         bus.last_apu_sync = self.cycles;
 
-        if bus.apu.bus.ports_written_during_run {
+        if bus.apu.bus.take_ports_written() {
             // The APU wrote to a port during the bulk skip. This means it
             // may be in the middle of a handshake expecting the CPU to read.
             // We can't undo the catch_up, but we stop skipping immediately
             // so the CPU resumes normal execution and reads the port.
             // The skip up to this point is already committed.
             //
-            // TODO(T10): This is the hook point for subdivided skip. A future
-            // refinement could cap the skip to the SPC instruction boundary
-            // where the port write occurred, reducing the window where the
-            // CPU misses a handshake. For now, the skip is committed in full
-            // and the CPU resumes normal execution on the next instruction.
+            // TODO(T10): A future refinement could subdivide the skip into
+            // ~18-cycle chunks (matching unskipped LDA+BEQ cadence) and
+            // break early when take_ports_written() returns true, reducing
+            // the window where the CPU misses a handshake.
+            self.idle_skip_hits += 1;
+            self.idle_skip_cycles += skip;
+            return Some(0);
         }
 
         // PC is intentionally NOT advanced — we resume at the LDA. The

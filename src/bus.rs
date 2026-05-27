@@ -432,6 +432,11 @@ impl Bus {
                 // Mid-DMA APU sync: on real hardware the APU continues
                 // running during DMA. Sync every 128 master cycles (16
                 // bytes) so timers and DSP sample generation stay in step.
+                // Note: if b_addr is in $2140-$217F, each byte also triggers
+                // sync_apu() via self.write(). Those inner syncs see delta=0
+                // (master_clock hasn't advanced yet) and are no-ops. No
+                // double-crediting occurs — the periodic sync below is the
+                // only one that advances the APU.
                 dma_cycles_since_sync += 8;
                 if dma_cycles_since_sync >= 128 {
                     self.master_clock += dma_cycles_since_sync as u64;

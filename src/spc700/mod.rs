@@ -53,7 +53,8 @@ pub struct ApuBus {
     /// ports). Used by idle-skip (T10) to detect APU port activity: if the
     /// APU writes a port during a bulk catch_up, the idle-skip should bail
     /// because the CPU would normally read that port between iterations.
-    pub ports_written_during_run: bool,
+    /// Use `take_ports_written()` to read and clear atomically.
+    ports_written_during_run: bool,
 }
 
 impl ApuBus {
@@ -67,6 +68,14 @@ impl ApuBus {
             rom_enabled: true,
             ports_written_during_run: false,
         }
+    }
+
+    /// Returns true if the SPC700 wrote to an output port ($F4-$F7) since
+    /// the last call to this method. Clears the flag atomically.
+    pub fn take_ports_written(&mut self) -> bool {
+        let written = self.ports_written_during_run;
+        self.ports_written_during_run = false;
+        written
     }
 
     /// Read a byte from the SPC700 address space.
