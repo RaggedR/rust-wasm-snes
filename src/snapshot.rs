@@ -31,9 +31,11 @@ use crate::dma::{Dma, DmaChannel};
 use crate::joypad::Joypad;
 use crate::ppu::{Ppu, BgLayer};
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
+/// V4: APU field `cycle_frac: u32` replaced with `master_cycles_total: u64`
+///     (distributive catch_up fix — 4 bytes wider).
 /// V3: Added auto_joypad_timer (u32) and auto_joypad_result (u16) to Bus.
 /// V2: APU field `cycle_debt: i64` replaced with `cycle_target: u64`.
-const VERSION: u8 = 3;
+const VERSION: u8 = 4;
 
 // ─── Writer helpers ─────────────────────────────────────────────────────
 

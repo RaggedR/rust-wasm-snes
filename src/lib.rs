@@ -335,6 +335,15 @@ impl Emulator {
             self.bus.master_clock = self.cpu.cycles;
             self.bus.sync_apu();
 
+            #[cfg(feature = "apu-trace")]
+            self.bus.apu.bus.event_log.push(
+                crate::spc700::events::ApuEvent::ScanlineFlush {
+                    scanline,
+                    master_cycle: self.bus.master_clock,
+                    apu_cycle: self.bus.apu.cycles,
+                }
+            );
+
             // Render visible scanlines
             if scanline >= 1 && scanline <= VISIBLE_SCANLINES {
                 // Run HDMA before rendering each scanline
@@ -530,6 +539,35 @@ impl Emulator {
     /// Enable/disable CPU trace logging.
     pub fn set_trace(&mut self, enabled: bool) {
         self.cpu.trace = enabled;
+    }
+
+    /// Current CPU program counter (low 16 bits of the 24-bit address).
+    pub fn cpu_pc(&self) -> u16 {
+        self.cpu.pc
+    }
+
+    /// Current CPU program bank register (high 8 bits of the 24-bit address).
+    pub fn cpu_pbr(&self) -> u8 {
+        self.cpu.pbr
+    }
+
+}
+
+// ── APU diagnostic event access (apu-trace feature) ──────────────────
+//
+// Separate impl block — NOT annotated with #[wasm_bindgen] because
+// ApuEvent is a Rust enum that can't cross the JS boundary. Used by
+// native binaries (bench, trace tools).
+#[cfg(feature = "apu-trace")]
+impl Emulator {
+    /// Drain all accumulated APU diagnostic events since the last drain.
+    pub fn drain_apu_events(&mut self) -> Vec<crate::spc700::events::ApuEvent> {
+        self.bus.apu.bus.event_log.drain()
+    }
+
+    /// Event count since last drain (for progress reporting without draining).
+    pub fn apu_event_count(&self) -> usize {
+        self.bus.apu.bus.event_log.len()
     }
 }
 

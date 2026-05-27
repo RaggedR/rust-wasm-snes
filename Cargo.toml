@@ -46,6 +46,10 @@ cpu-trace = []
 # Off by default — the determinism contract on main is computed with this
 # feature disabled. See docs/T10_IDLE_LOOP_DETECTION.md.
 idle-skip = []
+# Structured diagnostic events from the APU subsystem. Emits cycle-level
+# traces of port writes, DSP samples, sync points, and timer events.
+# Used for diagnosing the idle-skip audio divergence. Zero cost when off.
+apu-trace = []
 
 [[bin]]
 name = "snapshot_test"

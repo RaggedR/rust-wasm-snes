@@ -20,6 +20,11 @@ pub struct Timer {
     /// Total number of counter reads (debug/diagnostics).
     #[cfg(not(target_arch = "wasm32"))]
     pub read_count: u32,
+    /// Set to true by tick() when the counter fires. Cleared by last_fired().
+    /// Used by apu-trace to emit TimerFire events without changing tick()'s
+    /// return type.
+    #[cfg(feature = "apu-trace")]
+    fired: bool,
 }
 
 impl Timer {
@@ -30,12 +35,16 @@ impl Timer {
             fire_count: 0,
             #[cfg(not(target_arch = "wasm32"))]
             read_count: 0,
+            #[cfg(feature = "apu-trace")]
+            fired: false,
         }
     }
 
     /// Advance the timer by one tick at its native rate.
     /// Called every 128 SPC cycles for T0/T1, every 16 for T2.
     pub fn tick(&mut self) {
+        #[cfg(feature = "apu-trace")]
+        { self.fired = false; }
         if !self.enabled { return; }
         self.divider += 1;
         if self.divider >= self.target {
@@ -43,6 +52,8 @@ impl Timer {
             self.counter = (self.counter + 1) & 0x0F;
             #[cfg(not(target_arch = "wasm32"))]
             { self.fire_count += 1; }
+            #[cfg(feature = "apu-trace")]
+            { self.fired = true; }
         }
     }
 
@@ -53,6 +64,12 @@ impl Timer {
         #[cfg(not(target_arch = "wasm32"))]
         { self.read_count += 1; }
         val
+    }
+
+    /// Returns true if the timer fired on the last tick() call.
+    #[cfg(feature = "apu-trace")]
+    pub fn last_fired(&self) -> bool {
+        self.fired
     }
 
     /// Serialize timer state to a fixed-size blob (6 bytes).

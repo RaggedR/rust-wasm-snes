@@ -199,7 +199,17 @@ impl Bus {
             (0x00..=0x3F, 0x2140..=0x217F) => {
                 // JIT sync: catch up APU to the exact cycle of this port read.
                 self.sync_apu();
-                self.apu.cpu_read((addr & 3) as u8)
+                let port = (addr & 3) as u8;
+                let val = self.apu.cpu_read(port);
+                #[cfg(feature = "apu-trace")]
+                self.apu.bus.event_log.push(
+                    crate::spc700::events::ApuEvent::CpuPortRead {
+                        master_cycle: self.master_clock,
+                        port,
+                        value: val,
+                    }
+                );
+                val
             }
             (0x00..=0x3F, 0x2180) => { // WMDATA — read from WRAM at wram_addr
                 let val = self.wram[self.wram_addr as usize & 0x1FFFF];
@@ -253,7 +263,16 @@ impl Bus {
                 // JIT sync: catch up APU before the CPU writes new port data,
                 // so the SPC700 processes any pending instructions first.
                 self.sync_apu();
-                self.apu.cpu_write((addr & 3) as u8, val);
+                let port = (addr & 3) as u8;
+                #[cfg(feature = "apu-trace")]
+                self.apu.bus.event_log.push(
+                    crate::spc700::events::ApuEvent::CpuPortWrite {
+                        master_cycle: self.master_clock,
+                        port,
+                        value: val,
+                    }
+                );
+                self.apu.cpu_write(port, val);
             }
             (0x00..=0x3F, 0x2180) => { // WMDATA
                 self.wram[self.wram_addr as usize & 0x1FFFF] = val;

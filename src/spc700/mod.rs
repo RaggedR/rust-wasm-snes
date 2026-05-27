@@ -10,6 +10,8 @@
 
 pub mod cpu;
 pub mod dsp;
+#[cfg(feature = "apu-trace")]
+pub mod events;
 pub mod timers;
 
 use cpu::Spc700;
@@ -55,6 +57,11 @@ pub struct ApuBus {
     /// because the CPU would normally read that port between iterations.
     /// Use `take_ports_written()` to read and clear atomically.
     ports_written_during_run: bool,
+    /// Structured diagnostic event log. Lives on ApuBus (not Apu) because
+    /// the bus is &mut-borrowed during cpu.step() — port read/write events
+    /// can push directly without borrow conflicts.
+    #[cfg(feature = "apu-trace")]
+    pub event_log: events::ApuEventLog,
 }
 
 impl ApuBus {
@@ -67,6 +74,8 @@ impl ApuBus {
             ports_to_main: [0xAA, 0xBB, 0, 0],
             rom_enabled: true,
             ports_written_during_run: false,
+            #[cfg(feature = "apu-trace")]
+            event_log: events::ApuEventLog::new(),
         }
     }
 
@@ -85,12 +94,53 @@ impl ApuBus {
             0x00F1 => 0,
             0x00F2 => self.dsp.addr_reg,
             0x00F3 => self.dsp.read(self.dsp.addr_reg),
-            0x00F4..=0x00F7 => self.ports_from_main[(addr - 0xF4) as usize],
+            0x00F4..=0x00F7 => {
+                let port = (addr - 0xF4) as u8;
+                let val = self.ports_from_main[port as usize];
+                #[cfg(feature = "apu-trace")]
+                self.event_log.push(events::ApuEvent::PortRead {
+                    apu_cycle: self.event_log.current_cycle,
+                    port,
+                    value: val,
+                    spc_pc: self.event_log.current_pc,
+                });
+                val
+            }
             0x00F8..=0x00F9 => self.ram[addr as usize],
             0x00FA..=0x00FC => 0, // Timer targets are write-only
-            0x00FD => self.timers[0].read_counter(),
-            0x00FE => self.timers[1].read_counter(),
-            0x00FF => self.timers[2].read_counter(),
+            0x00FD => {
+                let val = self.timers[0].read_counter();
+                #[cfg(feature = "apu-trace")]
+                self.event_log.push(events::ApuEvent::TimerRead {
+                    apu_cycle: self.event_log.current_cycle,
+                    timer: 0,
+                    value: val,
+                    spc_pc: self.event_log.current_pc,
+                });
+                val
+            }
+            0x00FE => {
+                let val = self.timers[1].read_counter();
+                #[cfg(feature = "apu-trace")]
+                self.event_log.push(events::ApuEvent::TimerRead {
+                    apu_cycle: self.event_log.current_cycle,
+                    timer: 1,
+                    value: val,
+                    spc_pc: self.event_log.current_pc,
+                });
+                val
+            }
+            0x00FF => {
+                let val = self.timers[2].read_counter();
+                #[cfg(feature = "apu-trace")]
+                self.event_log.push(events::ApuEvent::TimerRead {
+                    apu_cycle: self.event_log.current_cycle,
+                    timer: 2,
+                    value: val,
+                    spc_pc: self.event_log.current_pc,
+                });
+                val
+            }
             0xFFC0..=0xFFFF if self.rom_enabled => IPL_ROM[(addr - 0xFFC0) as usize],
             _ => self.ram[addr as usize],
         }
@@ -118,10 +168,36 @@ impl ApuBus {
                 }
             }
             0x00F2 => self.dsp.addr_reg = val,
-            0x00F3 => self.dsp.write(self.dsp.addr_reg, val),
+            0x00F3 => {
+                #[cfg(feature = "apu-trace")]
+                {
+                    let dsp_addr = self.dsp.addr_reg & 0x7F;
+                    if dsp_addr == 0x4C && val != 0 {
+                        self.event_log.push(events::ApuEvent::VoiceKeyOn {
+                            apu_cycle: self.event_log.current_cycle,
+                            voice_mask: val,
+                        });
+                    }
+                    if dsp_addr == 0x5C && val != 0 {
+                        self.event_log.push(events::ApuEvent::VoiceKeyOff {
+                            apu_cycle: self.event_log.current_cycle,
+                            voice_mask: val,
+                        });
+                    }
+                }
+                self.dsp.write(self.dsp.addr_reg, val);
+            }
             0x00F4..=0x00F7 => {
-                self.ports_to_main[(addr - 0xF4) as usize] = val;
+                let port = (addr - 0xF4) as u8;
+                self.ports_to_main[port as usize] = val;
                 self.ports_written_during_run = true;
+                #[cfg(feature = "apu-trace")]
+                self.event_log.push(events::ApuEvent::PortWrite {
+                    apu_cycle: self.event_log.current_cycle,
+                    port,
+                    value: val,
+                    spc_pc: self.event_log.current_pc,
+                });
             }
             0x00FA => self.timers[0].target = if val == 0 { 256 } else { val as u16 },
             0x00FB => self.timers[1].target = if val == 0 { 256 } else { val as u16 },
@@ -196,8 +272,16 @@ pub struct Apu {
     pub bus: ApuBus,
     /// SPC700 cycle counter (for synchronization with main CPU).
     pub cycles: u64,
-    /// Fractional cycle accumulator for precise main→SPC timing.
-    pub cycle_frac: u32,
+    /// Monotonic total of master cycles passed to catch_up. The absolute
+    /// SPC cycle target is derived as `master_cycles_total / 21`, making
+    /// the master→SPC conversion distributive: catch_up(a); catch_up(b)
+    /// produces the same SPC cycle count as catch_up(a+b), because
+    /// `floor((total+a+b) / 21)` is independent of how the sum was chunked.
+    ///
+    /// This replaced the old `cycle_frac: u32` accumulator, which computed
+    /// SPC cycles per-call via `(frac + delta) / 21` — a non-distributive
+    /// operation that caused the idle-skip audio divergence.
+    master_cycles_total: u64,
     /// Absolute cycle target — the APU must run until self.cycles reaches
     /// this value. Using an absolute target instead of relative debt makes
     /// run_cycles chunk-insensitive: run_cycles(50); run_cycles(50) produces
@@ -219,7 +303,7 @@ impl Apu {
             cpu: Spc700::new(),
             bus: ApuBus::new(),
             cycles: 0,
-            cycle_frac: 0,
+            master_cycles_total: 0,
             cycle_target: 0,
             dsp_counter: 0,
             sample_buffer: Vec::with_capacity(2048),
@@ -284,7 +368,7 @@ impl Apu {
 
         // Reset timing and filter state.
         self.cycles = 0;
-        self.cycle_frac = 0;
+        self.master_cycles_total = 0;
         self.cycle_target = 0;
         self.dsp_counter = 0;
         self.sample_buffer.clear();
@@ -310,6 +394,13 @@ impl Apu {
         self.cycle_target += target_cycles as u64;
 
         while self.cycles < self.cycle_target {
+            // Update event log context so ApuBus::read/write can stamp events.
+            #[cfg(feature = "apu-trace")]
+            {
+                self.bus.event_log.current_cycle = self.cycles;
+                self.bus.event_log.current_pc = self.cpu.pc;
+            }
+
             // Execute one SPC700 instruction (each takes multiple cycles).
             let inst_cycles = if !self.cpu.halted {
                 self.cpu.step(&mut self.bus) as u64
@@ -323,18 +414,60 @@ impl Apu {
                 if c % 128 == 0 {
                     self.bus.timers[0].tick();
                     self.bus.timers[1].tick();
+                    #[cfg(feature = "apu-trace")]
+                    {
+                        if self.bus.timers[0].last_fired() {
+                            self.bus.event_log.push(events::ApuEvent::TimerFire {
+                                apu_cycle: c,
+                                timer: 0,
+                                counter: self.bus.timers[0].counter,
+                            });
+                        }
+                        if self.bus.timers[1].last_fired() {
+                            self.bus.event_log.push(events::ApuEvent::TimerFire {
+                                apu_cycle: c,
+                                timer: 1,
+                                counter: self.bus.timers[1].counter,
+                            });
+                        }
+                    }
                 }
                 if c % 16 == 0 {
                     self.bus.timers[2].tick();
+                    #[cfg(feature = "apu-trace")]
+                    if self.bus.timers[2].last_fired() {
+                        self.bus.event_log.push(events::ApuEvent::TimerFire {
+                            apu_cycle: c,
+                            timer: 2,
+                            counter: self.bus.timers[2].counter,
+                        });
+                    }
                 }
 
                 self.dsp_counter += 1;
                 if self.dsp_counter >= 32 {
                     self.dsp_counter = 0;
                     let (mut left, mut right) = self.bus.dsp.generate_sample(&mut self.bus.ram);
+
+                    #[cfg(feature = "apu-trace")]
+                    let (raw_l, raw_r) = (left, right);
+
                     self.output_filter.run(&mut left, &mut right);
                     self.sample_buffer.push(left);
                     self.sample_buffer.push(right);
+
+                    #[cfg(feature = "apu-trace")]
+                    {
+                        self.bus.event_log.sample_counter += 1;
+                        self.bus.event_log.push(events::ApuEvent::Sample {
+                            apu_cycle: c,
+                            left_raw: raw_l,
+                            right_raw: raw_r,
+                            left_filtered: left,
+                            right_filtered: right,
+                            sample_index: self.bus.event_log.sample_counter,
+                        });
+                    }
                 }
 
                 self.cycles += 1;
@@ -344,36 +477,46 @@ impl Apu {
 
     /// Run APU for the equivalent of `master_cycles` main CPU master clocks.
     ///
-    /// Converts master cycles to SPC700 cycles using a fractional accumulator
-    /// (master clock / 21 ~ SPC clock) and delegates to [`run_cycles`].
+    /// Accumulates master cycles into a monotonic total, then derives the
+    /// absolute SPC cycle target as `total / 21`. This makes the conversion
+    /// **distributive**: `catch_up(a); catch_up(b)` produces the same SPC
+    /// cycle count as `catch_up(a + b)`, because `floor((T + a + b) / 21)`
+    /// is independent of how the sum was chunked.
     ///
     /// # Algebraic properties (catch-up contract)
     ///
-    /// - **Zero-identity**: `catch_up(0)` is a no-op (no fractional accumulation,
-    ///   no SPC cycles dispatched).
-    ///
-    /// - **Monotonicity**: For `n > 0`, `catch_up(n)` advances `cycle_frac` and
-    ///   may trigger `run_cycles`. The fractional accumulator ensures that over
-    ///   long runs, the SPC/master cycle ratio converges to 1/21.
-    ///
-    /// - **Non-distributivity of integer division**: `catch_up(a); catch_up(b)`
-    ///   is NOT identical to `catch_up(a + b)` because `floor((f+a)/21) +
-    ///   floor((f'+b)/21)` may differ from `floor((f+a+b)/21)` depending on the
-    ///   fractional state `f`. This is acceptable for the JIT sync model where
-    ///   calls are infrequent (port accesses + scanline flush) but was the root
-    ///   cause of the T10 idle-skip audio divergence under the old per-instruction
-    ///   model.
+    /// - **Zero-identity**: `catch_up(0)` is a no-op.
+    /// - **Monotonicity**: SPC cycle target is monotonically non-decreasing.
+    /// - **Distributivity**: `catch_up(a); catch_up(b)` == `catch_up(a + b)`.
+    ///   This is the key fix for the idle-skip audio divergence: the old
+    ///   per-call `(frac + delta) / 21` was non-distributive, meaning that
+    ///   bulk catch_up during idle-skip produced different total SPC cycles
+    ///   than the same master cycles split across many small calls.
     pub fn catch_up(&mut self, master_cycles: u32) {
-        // SPC700 clock = master clock / 21 (approximately).
-        // Use fixed-point: accumulate master cycles, divide by 21.
-        // Use u64 intermediate to prevent theoretical u32 overflow if
-        // master_cycles is ever large (e.g., bulk idle-skip catch_up).
-        let acc = self.cycle_frac as u64 + master_cycles as u64;
-        let spc_cycles = (acc / 21) as u32;
-        self.cycle_frac = (acc % 21) as u32;
-        if spc_cycles > 0 {
+        #[cfg(feature = "apu-trace")]
+        let old_target = self.cycle_target;
+        #[cfg(feature = "apu-trace")]
+        let frac_before = (self.master_cycles_total % 21) as u32;
+
+        self.master_cycles_total += master_cycles as u64;
+        let absolute_spc_target = self.master_cycles_total / 21;
+
+        // Compute how many new SPC cycles this adds to the target.
+        // cycle_target tracks total SPC cycles dispatched to run_cycles;
+        // the delta is the new cycles needed.
+        if absolute_spc_target > self.cycle_target {
+            let spc_cycles = (absolute_spc_target - self.cycle_target) as u32;
             self.run_cycles(spc_cycles);
         }
+
+        #[cfg(feature = "apu-trace")]
+        self.bus.event_log.push(events::ApuEvent::CatchUp {
+            master_cycle: 0,
+            delta_master: master_cycles,
+            spc_cycles: (self.cycle_target - old_target) as u32,
+            cycle_frac_before: frac_before,
+            cycle_frac_after: (self.master_cycles_total % 21) as u32,
+        });
     }
 
     /// Main CPU reads from $2140-$2143.
@@ -384,6 +527,12 @@ impl Apu {
     /// Main CPU writes to $2140-$2143.
     pub fn cpu_write(&mut self, port: u8, val: u8) {
         self.bus.ports_from_main[port as usize & 3] = val;
+    }
+
+    /// The effective fractional remainder: `master_cycles_total % 21`.
+    /// Diagnostic accessor for tests and trace tools.
+    pub fn cycle_frac(&self) -> u32 {
+        (self.master_cycles_total % 21) as u32
     }
 
     /// Drain the audio sample buffer, returning all accumulated samples.
@@ -445,7 +594,7 @@ impl Apu {
 
         // ── Apu top-level ──
         out.extend_from_slice(&self.cycles.to_le_bytes());
-        out.extend_from_slice(&self.cycle_frac.to_le_bytes());
+        out.extend_from_slice(&self.master_cycles_total.to_le_bytes());
         out.extend_from_slice(&self.cycle_target.to_le_bytes());
         out.extend_from_slice(&self.dsp_counter.to_le_bytes());
         // Sample buffer (length-prefixed). Each sample is 2 bytes.
@@ -512,7 +661,7 @@ impl Apu {
 
         // Apu top-level
         self.cycles = u64::from_le_bytes(take!(8).try_into().unwrap());
-        self.cycle_frac = u32::from_le_bytes(take!(4).try_into().unwrap());
+        self.master_cycles_total = u64::from_le_bytes(take!(8).try_into().unwrap());
         self.cycle_target = u64::from_le_bytes(take!(8).try_into().unwrap());
         self.dsp_counter = u32::from_le_bytes(take!(4).try_into().unwrap());
 

@@ -241,9 +241,10 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU for the skipped cycles. catch_up is chunk-insensitive
-        // (absolute cycle_target, not relative debt) so a single call produces
-        // identical results to many small calls (distributive law holds).
+        // Drive the APU for the skipped cycles. catch_up is distributive
+        // (absolute master_cycles_total target) so a single bulk call
+        // produces the same SPC cycle count as many small calls delivering
+        // the same total.
         //
         // Check if the APU wrote to its output ports during the skip — if so,
         // the CPU would normally read those ports between loop iterations
@@ -261,12 +262,6 @@ impl Cpu {
             // may be in the middle of a handshake expecting the CPU to read.
             // We can't undo the catch_up, but we stop skipping immediately
             // so the CPU resumes normal execution and reads the port.
-            // The skip up to this point is already committed.
-            //
-            // TODO(T10): A future refinement could subdivide the skip into
-            // ~18-cycle chunks (matching unskipped LDA+BEQ cadence) and
-            // break early when take_ports_written() returns true, reducing
-            // the window where the CPU misses a handshake.
             self.idle_skip_aborted += 1;
             self.idle_skip_cycles += skip;
             return Some(0);

@@ -9,10 +9,15 @@
 
 use std::env;
 use std::fs;
+#[cfg(feature = "apu-trace")]
+use std::io::Write;
 use std::time::Instant;
 
 use zelda_a_link_to_the_past::Emulator;
 use zelda_a_link_to_the_past::cpu::tables::OPCODE_NAMES;
+
+#[cfg(feature = "apu-trace")]
+use zelda_a_link_to_the_past::spc700::events::ApuEvent;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -42,6 +47,23 @@ fn main() {
     let mut total_bytes_returned: u64 = 0;
 
     let mut total_audio_samples: u64 = 0;
+    #[cfg(feature = "apu-trace")]
+    let mut total_apu_events: u64 = 0;
+    #[cfg(feature = "apu-trace")]
+    let apu_trace_tsv = parse_flag(&args, "--apu-trace");
+
+    #[cfg(feature = "apu-trace")]
+    let mut tsv_writer: Option<std::io::BufWriter<std::fs::File>> = apu_trace_tsv.as_ref().map(|path| {
+        use std::io::Write;
+        let f = std::fs::File::create(path).unwrap_or_else(|e| {
+            eprintln!("ERROR: can't create APU trace file {path}: {e}");
+            std::process::exit(1);
+        });
+        let mut w = std::io::BufWriter::new(f);
+        writeln!(w, "type\tapu_cycle\tmaster_cycle\tdetail1\tdetail2\tdetail3\tdetail4").ok();
+        w
+    });
+
     let run_start = Instant::now();
     for i in 0..frames {
         let t = Instant::now();
@@ -54,6 +76,20 @@ fn main() {
         // this, the audio hash would be untouched and useless as a probe.
         let samples = emu.get_audio_samples();
         total_audio_samples += samples.len() as u64;
+
+        // Drain APU events and optionally write to TSV.
+        #[cfg(feature = "apu-trace")]
+        {
+            let events = emu.drain_apu_events();
+            total_apu_events += events.len() as u64;
+            if let Some(ref mut w) = tsv_writer {
+                use std::io::Write;
+                for e in &events {
+                    write_event_tsv(w, e);
+                }
+            }
+        }
+
         if i == frames - 1 {
             final_fb_hash = fnv1a_hash(&fb);
         }
@@ -97,6 +133,8 @@ fn main() {
     println!("  \"total_fb_bytes_returned\": {total_bytes_returned},");
     println!("  \"final_fb_hash\": \"{:016x}\",", final_fb_hash);
     println!("  \"total_audio_samples\": {total_audio_samples},");
+    #[cfg(feature = "apu-trace")]
+    println!("  \"total_apu_events\": {total_apu_events},");
     println!("  \"final_audio_hash\": \"{}\"", final_audio_hash);
     println!("}}");
 
@@ -175,4 +213,45 @@ fn fnv1a_hash(data: &[u8]) -> u64 {
 
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Write a single APU event as a tab-separated line.
+/// Format: type \t apu_cycle \t master_cycle \t detail1 \t detail2 \t detail3 \t detail4
+#[cfg(feature = "apu-trace")]
+fn write_event_tsv(w: &mut impl std::io::Write, e: &ApuEvent) {
+    match e {
+        ApuEvent::CatchUp { master_cycle, delta_master, spc_cycles, cycle_frac_before, cycle_frac_after } => {
+            writeln!(w, "CATCH\t0\t{master_cycle}\t{delta_master}\t{spc_cycles}\t{cycle_frac_before}\t{cycle_frac_after}").ok();
+        }
+        ApuEvent::ScanlineFlush { scanline, master_cycle, apu_cycle } => {
+            writeln!(w, "FLUSH\t{apu_cycle}\t{master_cycle}\t{scanline}\t\t\t").ok();
+        }
+        ApuEvent::PortWrite { apu_cycle, port, value, spc_pc } => {
+            writeln!(w, "PW\t{apu_cycle}\t0\t{port}\t{value:02X}\t{spc_pc:04X}\t").ok();
+        }
+        ApuEvent::PortRead { apu_cycle, port, value, spc_pc } => {
+            writeln!(w, "PR\t{apu_cycle}\t0\t{port}\t{value:02X}\t{spc_pc:04X}\t").ok();
+        }
+        ApuEvent::CpuPortWrite { master_cycle, port, value } => {
+            writeln!(w, "CPW\t0\t{master_cycle}\t{port}\t{value:02X}\t\t").ok();
+        }
+        ApuEvent::CpuPortRead { master_cycle, port, value } => {
+            writeln!(w, "CPR\t0\t{master_cycle}\t{port}\t{value:02X}\t\t").ok();
+        }
+        ApuEvent::Sample { apu_cycle, left_raw, right_raw, left_filtered, right_filtered, sample_index } => {
+            writeln!(w, "S\t{apu_cycle}\t{sample_index}\t{left_raw}\t{right_raw}\t{left_filtered}\t{right_filtered}").ok();
+        }
+        ApuEvent::VoiceKeyOn { apu_cycle, voice_mask } => {
+            writeln!(w, "KON\t{apu_cycle}\t0\t{voice_mask:02X}\t\t\t").ok();
+        }
+        ApuEvent::VoiceKeyOff { apu_cycle, voice_mask } => {
+            writeln!(w, "KOFF\t{apu_cycle}\t0\t{voice_mask:02X}\t\t\t").ok();
+        }
+        ApuEvent::TimerFire { apu_cycle, timer, counter } => {
+            writeln!(w, "TF\t{apu_cycle}\t0\t{timer}\t{counter}\t\t").ok();
+        }
+        ApuEvent::TimerRead { apu_cycle, timer, value, spc_pc } => {
+            writeln!(w, "TR\t{apu_cycle}\t0\t{timer}\t{value}\t{spc_pc:04X}\t").ok();
+        }
+    }
 }

@@ -3,8 +3,9 @@
 /// The catch-up contract specifies three properties:
 ///   1. Zero-identity: catch_up(0) is a no-op
 ///   2. Monotonicity: more master cycles => more SPC cycles executed
-///   3. Approximate associativity: split vs batched delivery produces
-///      equivalent total cycles (to within one SPC instruction boundary)
+///   3. **Exact** distributivity: catch_up(a); catch_up(b) produces the
+///      same SPC cycle count as catch_up(a+b) — guaranteed by deriving
+///      the absolute SPC target from total accumulated master cycles.
 
 use zelda_a_link_to_the_past::spc700::Apu;
 
@@ -17,12 +18,12 @@ fn fresh_apu() -> Apu {
 fn catch_up_zero_is_noop() {
     let mut apu = fresh_apu();
     let cycles_before = apu.cycles;
-    let frac_before = apu.cycle_frac;
+    let frac_before = apu.cycle_frac();
 
     apu.catch_up(0);
 
     assert_eq!(apu.cycles, cycles_before, "catch_up(0) must not advance SPC cycles");
-    assert_eq!(apu.cycle_frac, frac_before, "catch_up(0) must not change cycle_frac");
+    assert_eq!(apu.cycle_frac(), frac_before, "catch_up(0) must not change cycle_frac");
 }
 
 #[test]
@@ -69,10 +70,12 @@ fn catch_up_monotone_cumulative() {
 }
 
 #[test]
-fn catch_up_approximate_associativity() {
-    // catch_up(a) + catch_up(b) vs catch_up(a+b) should produce similar
-    // total SPC cycles. The difference is bounded by one SPC instruction
-    // (max 8 cycles) due to the absolute cycle_target mechanism.
+fn catch_up_exact_distributivity() {
+    // The core property: catch_up(a) + catch_up(b) must produce EXACTLY
+    // the same SPC cycles as catch_up(a+b). This is guaranteed by deriving
+    // the absolute SPC target from total accumulated master cycles:
+    //   target = master_cycles_total / 21
+    // Since floor(T/21) is a pure function of T, the chunking is irrelevant.
     let total_master = 10000u32;
 
     // Path A: one big call
@@ -93,27 +96,56 @@ fn catch_up_approximate_associativity() {
     }
     let split_cycles = apu_split.cycles;
 
-    // The difference should be small — bounded by the maximum SPC
-    // instruction length (8 cycles) plus fractional accumulator drift.
-    let diff = (batch_cycles as i64 - split_cycles as i64).unsigned_abs();
-    assert!(
-        diff <= 16,
-        "Batch vs split catch_up divergence too large: batch={} split={} diff={}",
-        batch_cycles, split_cycles, diff
+    // Must be exactly equal — not approximately, exactly.
+    assert_eq!(
+        batch_cycles, split_cycles,
+        "Distributivity violation: catch_up({total_master}) produced {batch_cycles} SPC cycles, \
+         but {} × catch_up({chunk}) + catch_up({remainder}) produced {split_cycles}",
+        full_chunks
+    );
+}
+
+#[test]
+fn catch_up_distributivity_with_varied_chunks() {
+    // Test distributivity across many different chunk sizes to exercise
+    // all possible fractional remainder states.
+    let total_master = 50000u32;
+
+    let mut apu_batch = fresh_apu();
+    apu_batch.catch_up(total_master);
+    let batch_cycles = apu_batch.cycles;
+
+    // Split into varied-size chunks: 7, 13, 18, 42, 100, 1364, ...
+    let chunks = [7, 13, 18, 42, 100, 1364, 3, 21, 200, 50];
+    let mut apu_split = fresh_apu();
+    let mut remaining = total_master;
+    let mut chunk_idx = 0;
+    while remaining > 0 {
+        let c = chunks[chunk_idx % chunks.len()].min(remaining);
+        apu_split.catch_up(c);
+        remaining -= c;
+        chunk_idx += 1;
+    }
+    let split_cycles = apu_split.cycles;
+
+    assert_eq!(
+        batch_cycles, split_cycles,
+        "Distributivity violation with varied chunks: batch={batch_cycles} split={split_cycles}"
     );
 }
 
 #[test]
 fn catch_up_fractional_accumulator_wraps_correctly() {
-    // The fractional accumulator (cycle_frac) should always be in [0, 21).
+    // The effective fractional remainder (master_cycles_total % 21)
+    // should always be in [0, 21).
     let mut apu = fresh_apu();
 
     for master in [1, 5, 13, 20, 21, 42, 100, 1364] {
         apu.catch_up(master);
         assert!(
-            apu.cycle_frac < 21,
+            apu.cycle_frac() < 21,
             "cycle_frac must be < 21 after catch_up({}): got {}",
-            master, apu.cycle_frac
+            master, apu.cycle_frac()
         );
     }
 }
