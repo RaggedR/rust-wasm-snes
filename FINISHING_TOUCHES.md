@@ -23,14 +23,9 @@ WRAM filled with deterministic xorshift32 pattern (seed `0xDEAD_BEEF`)
 instead of all-zeros. SMW and Zelda 3 hashes unchanged — both games
 clear WRAM on init. Done 2026-05-27.
 
-### Player 2 joypad stub
-`$4017` / `$4219` return hardcoded 0. Not a priority, but if a game
-reads P2 input for detection purposes (e.g. multitap probe), returning
-0 is correct for "no controller connected." Just needs a comment
-confirming this is intentional, not forgotten.
-
-**Files:** `src/bus.rs`
-**Effort:** 5 minutes (comment only)
+### ~~Player 2 joypad stub~~ DONE
+Comment added confirming 0 = "no controller connected" is intentional.
+Done 2026-05-27.
 
 ---
 
@@ -59,14 +54,9 @@ bus speed — changes timing, needs trace validation.
 
 ## Infrastructure
 
-### serve.py port conflict warning
-If port 8090 is already held by a plain `python -m http.server`,
-`serve.py` starts but the browser may connect to the wrong server
-(no COOP/COEP headers), silently disabling SharedArrayBuffer. Add a
-probe-and-warn before binding.
-
-**Files:** `web/serve.py`
-**Effort:** 15 minutes
+### ~~serve.py port conflict warning~~ DONE
+`check_port()` probes port 8090 before binding. If something is listening
+without COEP headers, prints a clear error and exits. Done 2026-05-27.
 
 ### Rename crate
 Still called `zelda-a-link-to-the-past` from early development. Should

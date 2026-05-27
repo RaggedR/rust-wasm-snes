@@ -317,7 +317,10 @@ impl Bus {
             (0x00..=0x3F, 0x2182) => (self.wram_addr >> 8) as u8,    // WMADDM
             (0x00..=0x3F, 0x2183) => (self.wram_addr >> 16) as u8,   // WMADDH (bit 0 only)
             (0x00..=0x3F, 0x4016) => self.joypad.read_serial(),
-            (0x00..=0x3F, 0x4017) => 0, // Player 2 — not implemented
+            // Player 2 controller ($4017/$4219): returns 0 = "no controller
+            // connected."  Correct for single-player; games that probe for a
+            // multitap or second controller treat 0 as "absent."
+            (0x00..=0x3F, 0x4017) => 0,
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
             (0x00..=0x3F, 0x4300..=0x437F) => self.dma.read(addr),
             // HiROM SRAM: banks $20-$3F, $6000-$7FFF.

@@ -8,8 +8,51 @@ If COOP/COEP cause issues with third-party assets (none currently — we
 serve everything from this origin), they can be removed temporarily."""
 import http.server
 import os
+import socket
+import sys
+import urllib.request
+
+PORT = 8090
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def check_port():
+    """Warn and exit if something is already listening on PORT without COEP.
+
+    A plain `python -m http.server` on the same port silently disables
+    SharedArrayBuffer because it doesn't send COOP/COEP headers.  macOS
+    may route IPv4 connections to the wrong server, breaking SAB for
+    browser sessions without any visible error."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1)
+        sock.connect(('127.0.0.1', PORT))
+        sock.close()
+    except (ConnectionRefusedError, OSError):
+        return  # Nothing listening — safe to bind.
+
+    # Something is listening. Check for COEP header.
+    try:
+        resp = urllib.request.urlopen(
+            f'http://127.0.0.1:{PORT}/', timeout=2)
+        coep = resp.headers.get('Cross-Origin-Embedder-Policy', '')
+        if coep:
+            print(f"WARNING: port {PORT} already has a COEP-enabled server. "
+                  "Is another serve.py running?", file=sys.stderr)
+        else:
+            print(f"ERROR: port {PORT} is held by a server WITHOUT COEP headers.\n"
+                  f"SharedArrayBuffer will be silently disabled.\n"
+                  f"Kill it first:  lsof -ti:{PORT} | xargs kill -9",
+                  file=sys.stderr)
+        sys.exit(1)
+    except Exception:
+        print(f"WARNING: port {PORT} is in use but not responding to HTTP. "
+              f"Kill it:  lsof -ti:{PORT} | xargs kill -9", file=sys.stderr)
+        sys.exit(1)
+
+
+check_port()
 
 
 class IsolatedHandler(http.server.SimpleHTTPRequestHandler):
@@ -27,6 +70,6 @@ IsolatedHandler.extensions_map.update({
     '.mjs': 'application/javascript',
 })
 
-server = http.server.HTTPServer(('', 8090), IsolatedHandler)
-print("Serving at http://localhost:8090 (COOP/COEP enabled — crossOriginIsolated == true)")
+server = http.server.HTTPServer(('', PORT), IsolatedHandler)
+print(f"Serving at http://localhost:{PORT} (COOP/COEP enabled — crossOriginIsolated == true)")
 server.serve_forever()
