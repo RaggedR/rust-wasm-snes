@@ -358,6 +358,7 @@ impl Bus {
         use crate::dma::DMA_TRANSFER_PATTERNS;
 
         let mut total_cycles: u64 = 0;
+        let mut dma_cycles_since_sync: u32 = 0;
 
         for ch_idx in 0..8u8 {
             if enable_mask & (1 << ch_idx) == 0 { continue; }
@@ -436,11 +437,26 @@ impl Bus {
                 unit_idx = (unit_idx + 1) % transfer_size;
                 remaining -= 1;
                 total_cycles += 8;
+
+                // Mid-DMA APU sync: on real hardware the APU continues
+                // running during DMA. Sync every 128 master cycles (16
+                // bytes) so timers and DSP sample generation stay in step.
+                dma_cycles_since_sync += 8;
+                if dma_cycles_since_sync >= 128 {
+                    self.master_clock += dma_cycles_since_sync as u64;
+                    self.sync_apu();
+                    dma_cycles_since_sync = 0;
+                }
             }
 
             self.dma.channels[ch_idx as usize].size = 0;
         }
 
+        // Credit any remaining DMA cycles not yet synced.
+        if dma_cycles_since_sync > 0 {
+            self.master_clock += dma_cycles_since_sync as u64;
+            self.sync_apu();
+        }
         self.pending_dma_cycles += total_cycles;
     }
 
@@ -503,6 +519,10 @@ impl Bus {
     /// Called at the start of each visible scanline (0-224).
     pub fn hdma_run_scanline(&mut self) {
         if self.hdmaen == 0 { return; }
+        // Flush pending APU cycles before HDMA transfers begin.
+        // HDMA runs during H-blank; the APU should be caught up to this
+        // point so any HDMA writes to APU ports see correct state.
+        self.sync_apu();
 
         for ch in 0..8u8 {
             if self.hdmaen & (1 << ch) == 0 { continue; }

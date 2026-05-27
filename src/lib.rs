@@ -213,19 +213,10 @@ impl Emulator {
             self.bus.ppu.scanline = scanline;
 
             // V/H-count IRQ: fires once when position matches, cleared by $4211 read.
+            // H-IRQ uses dot position within the scanline (0-339). We compute
+            // this from the cycle offset: dot = offset * 340 / 1364.
             let irq_mode = (self.bus.nmitimen >> 4) & 0x03;
-            if irq_mode != 0 && !self.bus.irq_flag {
-                let fire = match irq_mode {
-                    1 => true, // H-count: fire once per scanline (H position approximated)
-                    2 => scanline == self.bus.vtime, // V-count: fire when scanline matches
-                    3 => scanline == self.bus.vtime, // V+H: fire when V matches (H approximated)
-                    _ => false,
-                };
-                if fire {
-                    self.bus.irq_flag = true;
-                    self.cpu.irq_pending = true;
-                }
-            }
+            let scanline_start = self.cpu.cycles;
 
             // ── JIT sync model (Near/byuu Level 1) ──────────────────
             //
@@ -251,6 +242,24 @@ impl Emulator {
                 if !self.bus.hblank && self.cpu.cycles >= hblank_start {
                     self.bus.hblank = true;
                 }
+
+                // H/V-IRQ: check after each instruction so H-IRQ fires
+                // at the correct dot position within the scanline.
+                if irq_mode != 0 && !self.bus.irq_flag {
+                    let dot = ((self.cpu.cycles - scanline_start) * 340
+                               / MASTER_CYCLES_PER_SCANLINE) as u16;
+                    let fire = match irq_mode {
+                        1 => dot >= self.bus.htime,       // H-IRQ
+                        2 => scanline == self.bus.vtime,  // V-IRQ
+                        3 => scanline == self.bus.vtime && dot >= self.bus.htime, // V+H
+                        _ => false,
+                    };
+                    if fire {
+                        self.bus.irq_flag = true;
+                        self.cpu.irq_pending = true;
+                    }
+                }
+
                 self.bus.last_write_bank = self.cpu.pbr;
                 self.bus.last_write_pc = self.cpu.pc;
                 let elapsed = self.cpu.step(&mut self.bus);
