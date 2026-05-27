@@ -47,7 +47,7 @@ fn run_frame(cpu: &mut Cpu, bus: &mut Bus) {
             bus.nmi_flag = false;
             bus.hdma_init_frame();
         }
-        bus.ppu.scanline = scanline;
+        bus.ppu.set_scanline(scanline);
         let irq_mode = (bus.nmitimen >> 4) & 0x03;
         if irq_mode != 0 && !bus.irq_flag {
             let fire = match irq_mode {

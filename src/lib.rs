@@ -94,9 +94,9 @@ impl Emulator {
     }
 
     /// Run one frame and return the RGBA framebuffer as a Vec<u8>.
-    /// Kept for backward compatibility with the existing `index.html`;
-    /// new code should prefer `run_frame_no_return()` + `framebuffer_ptr()`
-    /// for zero-copy access.
+    /// DEPRECATED: use `run_frame_no_return()` + `framebuffer_ptr()` for
+    /// zero-copy access. This method copies 229 KB per frame.
+    #[deprecated(note = "use run_frame_no_return() + framebuffer_ptr() for zero-copy")]
     pub fn run_frame(&mut self) -> Vec<u8> {
         self.run_frame_inner(false);
         self.rgba_buffer.clone()
@@ -126,6 +126,7 @@ impl Emulator {
     pub fn framebuffer_len(&self) -> usize {
         self.rgba_buffer.len()
     }
+
 
     /// Byte offset of the APU sample buffer within WASM linear memory.
     /// Use with `wasm.memory.buffer` to construct an `Int16Array` view —
@@ -239,7 +240,7 @@ impl Emulator {
             }
 
             // Tell the PPU which scanline we're on (for V-counter latching).
-            self.bus.ppu.scanline = scanline;
+            self.bus.ppu.set_scanline(scanline);
 
             // V/H-count IRQ: fires once when position matches, cleared by $4211 read.
             // H-IRQ uses dot position within the scanline (0-339). We compute
@@ -551,6 +552,18 @@ impl Emulator {
         self.cpu.pbr
     }
 
+}
+
+// ── Native-only accessors (not wasm_bindgen) ─────────────────────────
+//
+// Methods that return references or Rust types that can't cross the
+// JS boundary. Used by native binaries (bench, debug tools).
+impl Emulator {
+    /// Direct read access to the persistent framebuffer. Avoids the
+    /// 229 KB copy that the deprecated `run_frame()` does.
+    pub fn framebuffer_bytes(&self) -> &[u8] {
+        &self.rgba_buffer
+    }
 }
 
 // ── APU diagnostic event access (apu-trace feature) ──────────────────

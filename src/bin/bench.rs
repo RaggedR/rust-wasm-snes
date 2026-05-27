@@ -67,10 +67,10 @@ fn main() {
     let run_start = Instant::now();
     for i in 0..frames {
         let t = Instant::now();
-        let fb = emu.run_frame();
+        emu.run_frame_no_return();
         let dt = t.elapsed().as_micros() as u64;
         frame_times_us.push(dt);
-        total_bytes_returned += fb.len() as u64;
+        total_bytes_returned += emu.framebuffer_len() as u64;
         // Drain audio samples each frame — mirrors what real consumers do
         // and feeds the running audio_hash inside the Emulator. Without
         // this, the audio hash would be untouched and useless as a probe.
@@ -91,7 +91,7 @@ fn main() {
         }
 
         if i == frames - 1 {
-            final_fb_hash = fnv1a_hash(&fb);
+            final_fb_hash = fnv1a_hash(emu.framebuffer_bytes());
         }
         if i % 100 == 99 {
             eprintln!("  frame {} of {}", i + 1, frames);

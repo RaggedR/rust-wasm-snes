@@ -97,7 +97,7 @@ fn main() {
                 bus.hdma_init_frame();
             }
 
-            bus.ppu.scanline = scanline;
+            bus.ppu.set_scanline(scanline);
 
             let irq_mode = (bus.nmitimen >> 4) & 0x03;
             if irq_mode != 0 && !bus.irq_flag {
@@ -303,7 +303,7 @@ fn main() {
                 bus2.auto_joypad_busy = false;
             }
             if scanline == 0 { bus2.vblank = false; bus2.nmi_flag = false; bus2.hdma_init_frame(); }
-            bus2.ppu.scanline = scanline;
+            bus2.ppu.set_scanline(scanline);
             let irq_mode = (bus2.nmitimen >> 4) & 0x03;
             if irq_mode != 0 && !bus2.irq_flag {
                 let fire = match irq_mode { 1 => true, 2 => scanline == bus2.vtime, 3 => scanline == bus2.vtime, _ => false };
@@ -339,7 +339,7 @@ fn main() {
                 bus2.auto_joypad_busy = false;
             }
             if scanline == 0 { bus2.vblank = false; bus2.nmi_flag = false; bus2.hdma_init_frame(); }
-            bus2.ppu.scanline = scanline;
+            bus2.ppu.set_scanline(scanline);
             let irq_mode = (bus2.nmitimen >> 4) & 0x03;
             if irq_mode != 0 && !bus2.irq_flag {
                 let fire = match irq_mode { 1 => true, 2 => scanline == bus2.vtime, 3 => scanline == bus2.vtime, _ => false };

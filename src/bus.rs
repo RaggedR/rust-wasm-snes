@@ -216,13 +216,17 @@ impl Bus {
                 self.wram_addr = (self.wram_addr + 1) & 0x1FFFF;
                 val
             }
+            (0x00..=0x3F, 0x2181) => self.wram_addr as u8,           // WMADDL
+            (0x00..=0x3F, 0x2182) => (self.wram_addr >> 8) as u8,    // WMADDM
+            (0x00..=0x3F, 0x2183) => (self.wram_addr >> 16) as u8,   // WMADDH (bit 0 only)
             (0x00..=0x3F, 0x4016) => self.joypad.read_serial(),
             (0x00..=0x3F, 0x4017) => 0, // Player 2 — not implemented
             (0x00..=0x3F, 0x4200..=0x42FF) => self.read_cpu_register(addr),
             (0x00..=0x3F, 0x4300..=0x437F) => self.dma.read(addr),
             (0x00..=0x3F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
 
-            // ROM banks $40-$6F
+            // ROM banks $40-$6F — high area is ROM, low area mirrors system area
+            (0x40..=0x6F, 0x0000..=0x7FFF) => self.read(0x00, addr),
             (0x40..=0x6F, 0x8000..=0xFFFF) => self.cart.read(bank, addr),
 
             // SRAM banks $70-$7D
@@ -292,6 +296,7 @@ impl Bus {
             (0x00..=0x3F, 0x4300..=0x437F) => { self.dma.write(addr, val); }
             (0x00..=0x3F, 0x8000..=0xFFFF) => {} // ROM — writes ignored
 
+            (0x40..=0x6F, 0x0000..=0x7FFF) => { self.write(0x00, addr, val); } // Mirror system area
             (0x40..=0x6F, 0x8000..=0xFFFF) => {} // ROM
 
             (0x70..=0x7D, 0x0000..=0x7FFF) => { // SRAM

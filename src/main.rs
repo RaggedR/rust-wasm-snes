@@ -56,7 +56,7 @@ fn main() {
                 bus.nmi_flag = false;
             }
 
-            bus.ppu.scanline = scanline;
+            bus.ppu.set_scanline(scanline);
             let target = cpu.cycles + 1364;
             while cpu.cycles < target {
                 let elapsed = cpu.step(&mut bus);

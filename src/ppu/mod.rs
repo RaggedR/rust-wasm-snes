@@ -187,6 +187,12 @@ impl Ppu {
         }
     }
 
+    /// Set the current scanline. Called by the frame loop at the start of
+    /// each scanline — encapsulates the PPU's knowledge of its V position.
+    pub fn set_scanline(&mut self, scanline: u16) {
+        self.scanline = scanline;
+    }
+
     /// Get the VRAM increment step size from the VMAIN register.
     fn vram_step(&self) -> u16 {
         match self.vram_increment & 0x03 {
