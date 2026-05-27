@@ -1,4 +1,4 @@
-// emulator-worker.js — Phase B Step 3
+// emulator-worker.js — Phase B Step 2
 //
 // Runs the SNES emulator off the main thread. Both audio and framebuffer
 // are written directly into SharedArrayBuffers — no postMessage for
@@ -34,6 +34,8 @@ async function handleLoad(romBytes) {
     const wasm = await init();
     wasmMemory = wasm.memory;
     emulator = new Emulator(romBytes);
+    frameSeq = 0;
+    if (fbSeqU32) Atomics.store(fbSeqU32, 0, 0);
     self.postMessage({ type: 'ready' });
 }
 
@@ -87,6 +89,10 @@ function tick() {
 
     if (fbSAB) {
         // One copy: WASM linear memory → SAB. Main thread reads directly.
+        // Note: the pixel write (set) and the seq signal (Atomics.store)
+        // are not jointly atomic — on ARM the main thread could read a
+        // partially-written frame. This is the same tradeoff bsnes/higan
+        // makes: one torn frame per several million is acceptable for video.
         fbU8.set(fbView);
         Atomics.store(fbSeqU32, 0, frameSeq);
     } else {

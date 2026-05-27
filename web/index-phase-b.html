@@ -207,6 +207,8 @@
             if (msg.type === 'ready') {
                 workerReady = true;
                 worker.postMessage({ type: 'start' });
+                lastPaintedSeq = 0;
+                rafHandle = requestAnimationFrame(paint);
                 return;
             }
             if (msg.type === 'status') {
@@ -223,6 +225,7 @@
 
         // ── rAF paint loop — reads framebuffer from SAB ──────
         let lastPaintedSeq = 0;
+        let rafHandle = null;
         function paint() {
             const seq = Atomics.load(fbSeqU32, 0);
             if (seq !== lastPaintedSeq) {
@@ -230,9 +233,8 @@
                 imageData.data.set(fbPixels);
                 ctx.putImageData(imageData, 0, 0);
             }
-            requestAnimationFrame(paint);
+            rafHandle = requestAnimationFrame(paint);
         }
-        requestAnimationFrame(paint);
 
         // ── ROM loading ───────────────────────────────────────
         dropZone.addEventListener('click', () => romInput.click());
@@ -303,6 +305,7 @@
         // ── Stop / back ───────────────────────────────────────
         function stopEmulator() {
             worker.postMessage({ type: 'stop' });
+            if (rafHandle !== null) { cancelAnimationFrame(rafHandle); rafHandle = null; }
             if (audioCtx) { audioCtx.close(); audioCtx = null; audioStarted = false; }
             canvas.style.display = 'none';
             dropZone.style.display = '';
