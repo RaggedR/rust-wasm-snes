@@ -1190,21 +1190,52 @@ fn adc8(cpu: &mut Cpu, val: u8) {
     let a = cpu.a as u8;
     let carry = cpu.p.c as u8;
     let result = a as u16 + val as u16 + carry as u16;
-    cpu.p.c = result > 0xFF;
+    // V flag computed from binary result (undefined in decimal mode per 65816 spec; leave as-is)
     cpu.p.v = (!(a ^ val) & (a ^ result as u8)) & 0x80 != 0;
-    let result8 = result as u8;
-    cpu.a = (cpu.a & 0xFF00) | result8 as u16;
-    cpu.update_nz8(result8);
+
+    if cpu.p.d {
+        // BCD adjustment: correct each nibble if it exceeds 9.
+        let mut bcd = (a & 0x0F) as u16 + (val & 0x0F) as u16 + carry as u16;
+        if bcd > 9 { bcd += 6; }
+        bcd += (a & 0xF0) as u16 + (val & 0xF0) as u16;
+        if bcd > 0x9F { bcd += 0x60; }
+        cpu.p.c = bcd > 0xFF;
+        let result8 = bcd as u8;
+        cpu.a = (cpu.a & 0xFF00) | result8 as u16;
+        cpu.update_nz8(result8);
+    } else {
+        cpu.p.c = result > 0xFF;
+        let result8 = result as u8;
+        cpu.a = (cpu.a & 0xFF00) | result8 as u16;
+        cpu.update_nz8(result8);
+    }
 }
 
 fn adc16(cpu: &mut Cpu, val: u16) {
     let a = cpu.a;
     let carry = cpu.p.c as u16;
     let result = a as u32 + val as u32 + carry as u32;
-    cpu.p.c = result > 0xFFFF;
+    // V flag computed from binary result (undefined in decimal mode per 65816 spec)
     cpu.p.v = (!(a ^ val) & (a ^ result as u16)) & 0x8000 != 0;
-    cpu.a = result as u16;
-    cpu.update_nz16(cpu.a);
+
+    if cpu.p.d {
+        // BCD adjustment for 16-bit: four nibbles
+        let mut bcd = (a & 0x000F) as u32 + (val & 0x000F) as u32 + carry as u32;
+        if bcd > 0x0009 { bcd += 0x0006; }
+        bcd += (a & 0x00F0) as u32 + (val & 0x00F0) as u32;
+        if bcd > 0x009F { bcd += 0x0060; }
+        bcd += (a & 0x0F00) as u32 + (val & 0x0F00) as u32;
+        if bcd > 0x09FF { bcd += 0x0600; }
+        bcd += (a & 0xF000) as u32 + (val & 0xF000) as u32;
+        if bcd > 0x9FFF { bcd += 0x6000; }
+        cpu.p.c = bcd > 0xFFFF;
+        cpu.a = bcd as u16;
+        cpu.update_nz16(cpu.a);
+    } else {
+        cpu.p.c = result > 0xFFFF;
+        cpu.a = result as u16;
+        cpu.update_nz16(cpu.a);
+    }
 }
 
 fn adc_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
@@ -1213,12 +1244,56 @@ fn adc_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {
 }
 
 fn sbc8(cpu: &mut Cpu, val: u8) {
-    // SBC is ADC with complement
-    adc8(cpu, !val);
+    if cpu.p.d {
+        // BCD subtraction for 8-bit.
+        // Carry and V flags use the binary result (V is undefined in decimal mode).
+        let a = cpu.a as u8;
+        let not_val = !val;
+        let carry_in = cpu.p.c as u8;
+        let bin = a as u16 + not_val as u16 + carry_in as u16;
+        cpu.p.c = bin > 0xFF;
+        cpu.p.v = (!(a ^ not_val) & (a ^ bin as u8)) & 0x80 != 0;
+
+        // BCD nibble adjustment
+        let borrow = 1i16 - carry_in as i16;
+        let mut lo = (a & 0x0F) as i16 - (val & 0x0F) as i16 - borrow;
+        let mut hi = (a >> 4) as i16 - (val >> 4) as i16;
+        if lo < 0 { lo -= 6; hi -= 1; }
+        if hi < 0 { hi -= 6; }
+        let result8 = (((hi & 0x0F) << 4) | (lo & 0x0F)) as u8;
+        cpu.a = (cpu.a & 0xFF00) | result8 as u16;
+        cpu.update_nz8(result8);
+    } else {
+        // SBC is ADC with complement
+        adc8(cpu, !val);
+    }
 }
 
 fn sbc16(cpu: &mut Cpu, val: u16) {
-    adc16(cpu, !val);
+    if cpu.p.d {
+        // BCD subtraction for 16-bit.
+        let a = cpu.a;
+        let not_val = !val;
+        let carry_in = cpu.p.c as u16;
+        let bin = a as u32 + not_val as u32 + carry_in as u32;
+        cpu.p.c = bin > 0xFFFF;
+        cpu.p.v = (!(a ^ not_val) & (a ^ bin as u16)) & 0x8000 != 0;
+
+        let borrow = 1i32 - carry_in as i32;
+        let mut n0 = (a & 0x000F) as i32 - (val & 0x000F) as i32 - borrow;
+        let mut n1 = ((a >> 4) & 0x0F) as i32 - ((val >> 4) & 0x0F) as i32;
+        let mut n2 = ((a >> 8) & 0x0F) as i32 - ((val >> 8) & 0x0F) as i32;
+        let mut n3 = ((a >> 12) & 0x0F) as i32 - ((val >> 12) & 0x0F) as i32;
+        if n0 < 0 { n0 -= 6; n1 -= 1; }
+        if n1 < 0 { n1 -= 6; n2 -= 1; }
+        if n2 < 0 { n2 -= 6; n3 -= 1; }
+        if n3 < 0 { n3 -= 6; }
+        cpu.a = (((n3 & 0x0F) << 12) | ((n2 & 0x0F) << 8)
+              | ((n1 & 0x0F) << 4)  | (n0 & 0x0F)) as u16;
+        cpu.update_nz16(cpu.a);
+    } else {
+        adc16(cpu, !val);
+    }
 }
 
 fn sbc_mem(cpu: &mut Cpu, bus: &mut Bus, a: Addr) {

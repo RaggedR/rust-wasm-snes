@@ -263,8 +263,12 @@ impl Dsp {
     }
 
     pub fn new() -> Self {
+        // FLG ($6C) = $E0 at power-on: mute=1, echo-write-disable=1, soft-reset=1.
+        // All other registers are zeroed.
+        let mut regs = [0u8; 128];
+        regs[0x6C] = 0xE0; // FLG: mute | echo-write-disable | soft-reset
         Self {
-            regs: [0; 128],
+            regs,
             addr_reg: 0,
             voices: std::array::from_fn(|_| Voice::default()),
             global_counter: 0,

@@ -171,6 +171,14 @@ impl Bus {
     /// Read a byte from the bus. This is the hot path for all CPU reads.
     /// Takes `&mut self` because some register reads have side effects
     /// (flipflops, counters, flag clears).
+    ///
+    /// NOTE: This dispatch is LoROM-only. The ROM header parser detects HiROM
+    /// (`MapMode::HiROM` in `rom.rs`), but no HiROM bus routing is implemented.
+    /// HiROM ROMs will be silently mapped incorrectly.
+    ///
+    /// NOTE: Special chip ROMs (SA-1, SuperFX, DSP-1, etc.) are not detected.
+    /// The ROM type byte ($7FD6) is not parsed. Loading a special chip ROM will
+    /// silently treat it as plain LoROM, producing incorrect emulation.
     pub fn read(&mut self, bank: u8, addr: u16) -> u8 {
         let eb = bank & 0x7F; // Mirror $80-$FF → $00-$7F
 
