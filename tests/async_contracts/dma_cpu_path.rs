@@ -3,8 +3,8 @@
 /// property. A DMA transfer to $2140-$217F must write to the same
 /// ports_from_main array that a CPU write to $2140-$217F does.
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
+use rsnes::bus::Bus;
+use rsnes::rom::{Cartridge, MapMode};
 
 /// Create a minimal Bus with a dummy cartridge.
 fn test_bus() -> Bus {

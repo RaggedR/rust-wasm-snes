@@ -2,7 +2,7 @@
 //!
 //! Codifies ROM loading, header parsing, and address mapping.
 
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
+use rsnes::rom::{Cartridge, MapMode};
 
 #[test]
 fn rom_lorom_read_formula() {
@@ -57,9 +57,10 @@ fn rom_lorom_bank_masking() {
 }
 
 #[test]
-fn rom_out_of_range_returns_zero() {
-    // Reading beyond ROM size should return 0 (open bus approximation)
-    let rom = vec![0xFFu8; 0x8000]; // 32KB ROM
+fn rom_out_of_range_mirrors() {
+    // Reading beyond ROM size should mirror (offset % rom.len()),
+    // matching real SNES hardware with under-decoded address lines.
+    let rom = vec![0xAAu8; 0x8000]; // 32KB ROM, all 0xAA
 
     let cart = Cartridge {
         rom,
@@ -74,11 +75,11 @@ fn rom_out_of_range_returns_zero() {
         checksum_complement: 0,
     };
 
-    // Bank 2 would need offset $10000 which exceeds 32KB ROM
+    // Bank 2 would need offset $10000 which exceeds 32KB ROM — mirrors back
     assert_eq!(
         cart.read(0x02, 0x8000),
-        0,
-        "Out-of-range ROM read should return 0"
+        0xAA,
+        "Out-of-range ROM read should mirror"
     );
 }
 

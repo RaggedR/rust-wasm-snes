@@ -138,7 +138,7 @@ cargo build --release --features idle-skip
 
 - SMW overworld stalls in mode 07 — the `$4016` joypad serial protocol fix is correct in the debug runner but the WASM build still doesn't transition past the title in some cases. Tracked.
 - MMX audio broken (different SPC pattern than tested games).
-- Crate name is still `zelda-a-link-to-the-past` from when LTTP was the only working game. Rename pending.
+- Crate renamed to `rsnes`.
 
 ## Credits
 

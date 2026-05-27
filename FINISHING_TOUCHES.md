@@ -55,14 +55,9 @@ Done 2026-05-27.
 `check_port()` probes port 8090 before binding. If something is listening
 without COEP headers, prints a clear error and exits. Done 2026-05-27.
 
-### Rename crate
-Still called `zelda-a-link-to-the-past` from early development. Should
-be `rust-wasm-snes` or `rsnes`. Find-and-replace across `Cargo.toml`,
-`wasm-pack` output paths, and JS import statements. Schedule after the
-open PRs are merged to avoid diff noise.
-
-**Files:** `Cargo.toml`, `web/*.html`, `web/*.js`, `bench/*.js`
-**Effort:** 30 minutes
+### ~~Rename crate~~ DONE
+Renamed from `zelda-a-link-to-the-past` to `rsnes`. All Cargo.toml,
+`use` imports, and web JS imports updated. Done 2026-05-27.
 
 ### ~~Deprecate `run_frame()` copy path~~ DONE
 Marked `#[deprecated]`, bench.rs switched to zero-copy, `framebuffer_bytes()`

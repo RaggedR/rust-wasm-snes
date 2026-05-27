@@ -17,8 +17,8 @@
 //!
 //! Run with: cargo test --test categorical_laws
 
-use zelda_a_link_to_the_past::ppu::color::snes_to_argb;
-use zelda_a_link_to_the_past::cpu::StatusRegister;
+use rsnes::ppu::color::snes_to_argb;
+use rsnes::cpu::StatusRegister;
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -266,10 +266,10 @@ fn section_retraction_to_byte_is_injective_native() {
 // "Not observable" (intentionally excluded): opcode_counts, audio_hash.
 // ═══════════════════════════════════════════════════════════════════
 
-use zelda_a_link_to_the_past::cpu::Cpu;
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
-use zelda_a_link_to_the_past::snapshot::{snapshot_state, restore_state};
+use rsnes::cpu::Cpu;
+use rsnes::bus::Bus;
+use rsnes::rom::{Cartridge, MapMode};
+use rsnes::snapshot::{snapshot_state, restore_state};
 
 fn test_bus() -> Bus {
     let mut rom = vec![0u8; 0x8000];

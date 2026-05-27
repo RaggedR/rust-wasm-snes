@@ -2,7 +2,7 @@
 //!
 //! Codifies the public interface and key rendering invariants of src/ppu/.
 
-use zelda_a_link_to_the_past::ppu::Ppu;
+use rsnes::ppu::Ppu;
 
 #[test]
 fn ppu_frame_buffer_dimensions() {

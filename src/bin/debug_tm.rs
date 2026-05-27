@@ -8,9 +8,9 @@ use std::env;
 use std::fs;
 use std::io::Write;
 
-use zelda_a_link_to_the_past::rom::Cartridge;
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::cpu::Cpu;
+use rsnes::rom::Cartridge;
+use rsnes::bus::Bus;
+use rsnes::cpu::Cpu;
 use std::path::Path;
 
 const MASTER_CYCLES_PER_SCANLINE: u64 = 1364;

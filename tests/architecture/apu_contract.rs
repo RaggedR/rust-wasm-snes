@@ -2,7 +2,7 @@
 //!
 //! Codifies the public interface and key invariants of src/spc700/.
 
-use zelda_a_link_to_the_past::spc700::Apu;
+use rsnes::spc700::Apu;
 
 #[test]
 fn apu_catch_up_zero_is_noop() {

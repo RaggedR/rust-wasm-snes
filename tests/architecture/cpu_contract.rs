@@ -3,9 +3,9 @@
 //! Codifies the public interface and invariants of src/cpu/.
 //! If refactoring breaks these, the interface changed.
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::cpu::Cpu;
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
+use rsnes::bus::Bus;
+use rsnes::cpu::Cpu;
+use rsnes::rom::{Cartridge, MapMode};
 
 /// Build a minimal bus with a small ROM for testing.
 fn test_bus() -> Bus {
@@ -43,18 +43,18 @@ fn cpu_step_returns_nonzero_master_cycles() {
 }
 
 #[test]
-fn cpu_step_returns_multiple_of_6_for_normal_instructions() {
-    // Master cycles = CPU cycles * 6. Normal instructions must return a
-    // multiple of 6.
+fn cpu_step_returns_multiple_of_2_for_normal_instructions() {
+    // With variable bus speed (6/8/12 master cycles per access),
+    // step() returns a sum of even values — always a multiple of 2.
     let mut cpu = Cpu::new();
     let mut bus = test_bus();
     cpu.reset(&mut bus);
 
     let elapsed = cpu.step(&mut bus);
     assert_eq!(
-        elapsed % 6,
+        elapsed % 2,
         0,
-        "step() returned {} which is not a multiple of 6",
+        "step() returned {} which is not a multiple of 2",
         elapsed
     );
 }
@@ -117,7 +117,7 @@ fn cpu_native_mode_respects_flags() {
 #[test]
 fn cpu_status_register_pack_unpack_roundtrip() {
     // Flag packing/unpacking must be a roundtrip for both modes.
-    use zelda_a_link_to_the_past::cpu::StatusRegister;
+    use rsnes::cpu::StatusRegister;
 
     // Native mode: all flags ON
     let p = StatusRegister {
@@ -158,7 +158,7 @@ fn cpu_status_register_pack_unpack_roundtrip() {
 
 #[test]
 fn cpu_emulation_mode_status_sets_bit5() {
-    use zelda_a_link_to_the_past::cpu::StatusRegister;
+    use rsnes::cpu::StatusRegister;
     let p = StatusRegister {
         n: false, v: false, m: false, x: false,
         d: false, i: false, z: false, c: false,

@@ -9,7 +9,7 @@
 //
 // Loaded as an ES-module worker:  new Worker(url, { type: 'module' })
 
-import init, { Emulator } from './pkg/zelda_a_link_to_the_past.js';
+import init, { Emulator } from './pkg/rsnes.js';
 
 let emulator = null;
 let wasmMemory = null;

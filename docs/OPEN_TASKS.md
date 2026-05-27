@@ -81,15 +81,8 @@ Recommend (1) for the public repo.
 
 Fix: before `server.serve_forever()`, probe `localhost:8090` and check whether `Cross-Origin-Embedder-Policy` is set on the response. If something responds without it, print a loud warning and exit non-zero. 5-min fix.
 
-### Rename crate from `zelda-a-link-to-the-past`
-The name is an early-development artifact when LTTP was the only working title. Now boots SMW, LTTP, MMX, Super Metroid.
-
-Changes: `Cargo.toml`, wasm-pack output filenames in `pkg/`, `web/emulator-worker.js` import path, `web/index*.html` script references, README, CLAUDE.md.
-
-Suggested name: `rust-wasm-snes` (matches repo) or `rsnes` (compact).
-
-- **Risk:** low; deterministic find-replace
-- **Schedule:** post-T13, since Phase B is touching worker glue anyway
+### ~~Rename crate from `zelda-a-link-to-the-past`~~ DONE
+Renamed to `rsnes`. All imports, Cargo.toml, web JS references updated. Done 2026-05-27.
 
 ---
 

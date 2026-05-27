@@ -9,8 +9,8 @@ use std::env;
 use std::fs;
 use std::io::Write;
 
-use zelda_a_link_to_the_past::spc::SpcFile;
-use zelda_a_link_to_the_past::spc700::Apu;
+use rsnes::spc::SpcFile;
+use rsnes::spc700::Apu;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

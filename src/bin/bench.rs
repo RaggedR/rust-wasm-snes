@@ -13,11 +13,11 @@ use std::fs;
 use std::io::Write;
 use std::time::Instant;
 
-use zelda_a_link_to_the_past::Emulator;
-use zelda_a_link_to_the_past::cpu::tables::OPCODE_NAMES;
+use rsnes::Emulator;
+use rsnes::cpu::tables::OPCODE_NAMES;
 
 #[cfg(feature = "apu-trace")]
-use zelda_a_link_to_the_past::spc700::events::ApuEvent;
+use rsnes::spc700::events::ApuEvent;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

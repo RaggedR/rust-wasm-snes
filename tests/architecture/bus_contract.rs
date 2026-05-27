@@ -2,8 +2,8 @@
 //!
 //! Codifies the bus dispatch interface and address decoding invariants.
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
+use rsnes::bus::Bus;
+use rsnes::rom::{Cartridge, MapMode};
 
 fn test_bus() -> Bus {
     let mut rom = vec![0u8; 0x8000];

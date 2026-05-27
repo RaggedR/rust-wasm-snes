@@ -7,7 +7,7 @@
 ///      same SPC cycle count as catch_up(a+b) — guaranteed by deriving
 ///      the absolute SPC target from total accumulated master cycles.
 
-use zelda_a_link_to_the_past::spc700::Apu;
+use rsnes::spc700::Apu;
 
 /// Helper: create a fresh APU with IPL ROM ready to execute.
 fn fresh_apu() -> Apu {

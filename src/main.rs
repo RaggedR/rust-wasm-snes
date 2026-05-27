@@ -4,10 +4,10 @@
 use std::path::Path;
 use std::fs;
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::cpu::Cpu;
-use zelda_a_link_to_the_past::joypad::*;
-use zelda_a_link_to_the_past::rom::Cartridge;
+use rsnes::bus::Bus;
+use rsnes::cpu::Cpu;
+use rsnes::joypad::*;
+use rsnes::rom::Cartridge;
 
 /// Write the PPU framebuffer as a raw PPM image (simple, no deps).
 fn dump_frame(fb: &[u32; 256 * 224], path: &str) {

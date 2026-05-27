@@ -4,8 +4,8 @@
 /// $2140-$2143. Under JIT sync, port reads force an APU catch-up so the
 /// SPC700 has had a chance to process and respond.
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::rom::{Cartridge, MapMode};
+use rsnes::bus::Bus;
+use rsnes::rom::{Cartridge, MapMode};
 
 /// Create a minimal Bus with a dummy cartridge (no ROM needed).
 fn test_bus() -> Bus {

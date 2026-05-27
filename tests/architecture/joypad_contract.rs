@@ -2,7 +2,7 @@
 //!
 //! Codifies the joypad input interface.
 
-use zelda_a_link_to_the_past::joypad::{Joypad, BTN_A, BTN_B, BTN_START, BTN_UP};
+use rsnes::joypad::{Joypad, BTN_A, BTN_B, BTN_START, BTN_UP};
 
 #[test]
 fn joypad_set_button_and_read_auto() {

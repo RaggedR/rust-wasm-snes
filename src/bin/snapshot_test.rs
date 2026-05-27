@@ -11,10 +11,10 @@
 use std::env;
 use std::path::Path;
 
-use zelda_a_link_to_the_past::bus::Bus;
-use zelda_a_link_to_the_past::cpu::Cpu;
-use zelda_a_link_to_the_past::rom::Cartridge;
-use zelda_a_link_to_the_past::snapshot::{snapshot_state, restore_state};
+use rsnes::bus::Bus;
+use rsnes::cpu::Cpu;
+use rsnes::rom::Cartridge;
+use rsnes::snapshot::{snapshot_state, restore_state};
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;

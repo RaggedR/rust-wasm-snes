@@ -2,7 +2,7 @@
 //!
 //! Codifies the DMA register interface and transfer mode patterns.
 
-use zelda_a_link_to_the_past::dma::{Dma, DMA_TRANSFER_PATTERNS, DMA_TRANSFER_SIZES};
+use rsnes::dma::{Dma, DMA_TRANSFER_PATTERNS, DMA_TRANSFER_SIZES};
 
 #[test]
 fn dma_channel_register_roundtrip() {
