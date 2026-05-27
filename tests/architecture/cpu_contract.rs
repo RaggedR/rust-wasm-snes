@@ -43,9 +43,12 @@ fn cpu_step_returns_nonzero_master_cycles() {
 }
 
 #[test]
+#[cfg(not(feature = "idle-skip"))]
 fn cpu_step_returns_multiple_of_6_for_normal_instructions() {
     // Master cycles = CPU cycles * 6. Normal instructions must return a
-    // multiple of 6.
+    // multiple of 6. Note: under the `idle-skip` feature, step() can return
+    // 0 for fast-forwarded idle loops, so this contract only holds with
+    // idle-skip disabled.
     let mut cpu = Cpu::new();
     let mut bus = test_bus();
     cpu.reset(&mut bus);

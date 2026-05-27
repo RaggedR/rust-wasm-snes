@@ -16,41 +16,35 @@ information hiding. Snapshot.rs directly accesses ~100 fields across all modules
 
 ---
 
-## Issues Fixed
+## Issues Identified (fixed in PR #19, not this PR)
 
-### Determinism Risks Resolved
+The following issues were identified by the architecture audit. The actual source
+fixes landed in PR #19 (category theory sweep), which this PR depends on.
 
-| Risk | Resolution |
-|------|------------|
+### Determinism Risks
+
+| Risk | Status |
+|------|--------|
 | No HashMap in emulation core | Verified clean — no action needed |
 | No f32/f64 in emulation core | Verified clean — no action needed |
 | No rand, no Instant in emulation core | Verified clean — no action needed |
 
-### Information Leaks Fixed
+### Information Leaks (fixed in PR #19)
 
-| Leak | Resolution |
-|------|------------|
-| `joypad.current` accessed directly from `lib.rs` and `bus.rs` | Added `Joypad::set_button()` and `Joypad::read_auto()` methods. `lib.rs` now uses `set_button()`, `bus.rs` now uses `read_auto()`. |
-| `bus.apu.bus.dsp.dump_voices()` — 3-level deep field access | Added `Apu::dump_dsp_voices()` delegate method. `lib.rs` calls 1 level deep. |
-| `bus.apu.bus.dsp.debug_log` — 3-level deep field access | Added `Apu::drain_dsp_debug()` delegate method. `lib.rs` calls 1 level deep. |
-| `bus.apu.bus.dsp.regs[0x4C]` — deep DSP register access | Added `Apu::dsp_reg(addr)` accessor. `lib.rs` calls 1 level deep. |
-| Unused import `crate::spc700::Apu` in `snapshot.rs` | Removed. |
+| Leak | Fix (in PR #19) |
+|------|-----------------|
+| `joypad.current` accessed directly from `lib.rs` and `bus.rs` | `Joypad::set_button()` and `Joypad::read_auto()` accessors |
+| `bus.apu.bus.dsp.dump_voices()` — 3-level deep field access | `Apu::dump_dsp_voices()` delegate method |
+| `bus.apu.bus.dsp.debug_log` — 3-level deep field access | `Apu::drain_dsp_debug()` delegate method |
+| `bus.apu.bus.dsp.regs[0x4C]` — deep DSP register access | `Apu::dsp_reg(addr)` accessor |
+| Unused import `crate::spc700::Apu` in `snapshot.rs` | Removed |
 
-### Refactors Applied
-
-| # | Refactor | Files Changed |
-|---|----------|---------------|
-| 2 | Remove dead `apu.rs` (ApuStub) | `src/lib.rs` (removed `pub mod apu`) |
-| 2 | Remove dead `dma::execute_dma()` | `src/dma.rs` (deleted 60 lines) |
-| 11 | Consolidate debug dump methods — add delegate methods to APU | `src/spc700/mod.rs` (3 new methods), `src/lib.rs` (updated callers) |
-
-### Dead Code Removed
+### Dead Code (removed in PR #19)
 
 | File/Item | Reason |
 |-----------|--------|
 | `src/apu.rs` (`ApuStub`) | Superseded by real SPC700 in `spc700/`. Module declaration removed from `lib.rs`. |
 | `dma::execute_dma()` (60 lines) | Never called anywhere. Abandoned closure-based DMA attempt. |
-| `use crate::spc700::Apu` in `snapshot.rs` | Unused import. |
 
 ---
 
@@ -73,9 +67,8 @@ First tests ever written for this codebase. 87 tests across 7 modules, all in `t
 ## Test Run
 
 - **Runner:** `cargo test --test architecture_contracts`
-- **Attempts:** 1/3
-- **Final result:** PASS
-- **Tests:** 87 total, 87 passed, 0 failed
+- **Result:** PASS (requires PR #19 source changes to compile)
+- **Tests:** 83 total, 83 passed, 0 failed
 
 ### Determinism Check
 
