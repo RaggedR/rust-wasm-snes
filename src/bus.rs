@@ -642,8 +642,12 @@ impl Bus {
 
     /// Initialize HDMA channels at the start of each frame (scanline 0).
     /// Reads the first table entry for each enabled HDMA channel.
+    /// Consumed cycles are added to `pending_dma_cycles` — the frame loop
+    /// credits them to the CPU timeline the same way as general DMA.
     pub fn hdma_init_frame(&mut self) {
         if self.hdmaen == 0 { return; }
+
+        let mut cycles: u64 = 0;
 
         for ch in 0..8u8 {
             if self.hdmaen & (1 << ch) == 0 {
@@ -656,71 +660,83 @@ impl Bus {
             c.hdma_addr = c.src_addr;
             c.hdma_terminated = false;
             c.hdma_do_transfer = true;
+            cycles += 8; // 8 master cycles overhead per active channel
         }
 
         // Load first table entry for each channel (needs bus access)
         for ch in 0..8u8 {
             if self.hdmaen & (1 << ch) == 0 { continue; }
             if self.dma.channels[ch as usize].hdma_terminated { continue; }
-            self.hdma_load_entry(ch);
+            cycles += self.hdma_load_entry(ch);
         }
+
+        self.pending_dma_cycles += cycles;
     }
 
-    /// Load the next HDMA table entry for a channel.
-    fn hdma_load_entry(&mut self, ch: u8) {
+    /// Load the next HDMA table entry for a channel. Returns the number
+    /// of master cycles consumed (8 per bus access).
+    fn hdma_load_entry(&mut self, ch: u8) -> u64 {
         let idx = ch as usize;
         let bank = self.dma.channels[idx].src_bank;
         let addr = self.dma.channels[idx].hdma_addr;
+        let mut cycles: u64 = 0;
 
-        // Read line count byte
+        // Read line count byte (1 bus access = 8 master cycles)
         let line_count = self.read(bank, addr);
         self.dma.channels[idx].hdma_addr = addr.wrapping_add(1);
+        cycles += 8;
 
         if line_count == 0 {
             self.dma.channels[idx].hdma_terminated = true;
-            return;
+            return cycles;
         }
 
         self.dma.channels[idx].hdma_line_counter = line_count;
         self.dma.channels[idx].hdma_do_transfer = true;
 
-        // For indirect mode, read 16-bit data address from table
+        // For indirect mode, read 16-bit data address from table (2 bus accesses)
         let indirect = self.dma.channels[idx].control & 0x40 != 0;
         if indirect {
             let tbl_addr = self.dma.channels[idx].hdma_addr;
             let lo = self.read(bank, tbl_addr) as u16;
             let hi = self.read(bank, tbl_addr.wrapping_add(1)) as u16;
-            self.dma.channels[idx].size = lo | (hi << 8); // indirect addr stored in size field
+            self.dma.channels[idx].size = lo | (hi << 8);
             self.dma.channels[idx].hdma_addr = tbl_addr.wrapping_add(2);
+            cycles += 16; // 2 reads × 8 master cycles
         }
+
+        cycles
     }
 
     /// Execute HDMA transfers for one scanline.
     /// Called at the start of each visible scanline (0-224).
     ///
+    /// Each active channel costs 8 master cycles overhead (line counter
+    /// decrement + transfer check), plus 8 per byte transferred. Cycles
+    /// are added to `pending_dma_cycles` for the frame loop to credit.
+    ///
     /// NOTE: This currently runs AFTER the end-of-scanline APU flush in
     /// run_frame_inner(), so the sync_apu() call below always sees delta=0
     /// and is effectively a no-op. On real hardware, HDMA runs during H-blank
     /// at the START of a scanline (before CPU execution), not after.
-    /// Moving HDMA to run before the CPU step loop would make this pre-sync
-    /// meaningful and improve timing accuracy for games that use HDMA to
-    /// write APU ports.
     pub fn hdma_run_scanline(&mut self) {
         if self.hdmaen == 0 { return; }
         // Flush pending APU cycles before HDMA transfers begin.
-        // HDMA runs during H-blank; the APU should be caught up to this
-        // point so any HDMA writes to APU ports see correct state.
-        // (Currently a no-op — see doc comment above.)
         self.sync_apu();
+
+        let mut cycles: u64 = 0;
 
         for ch in 0..8u8 {
             if self.hdmaen & (1 << ch) == 0 { continue; }
             let idx = ch as usize;
             if self.dma.channels[idx].hdma_terminated { continue; }
 
+            // 8 master cycles overhead per active channel per scanline.
+            cycles += 8;
+
             // Transfer data if flagged
             if self.dma.channels[idx].hdma_do_transfer {
-                self.hdma_transfer(ch);
+                cycles += self.hdma_transfer(ch);
             }
 
             // Decrement line counter (bits 0-6 only)
@@ -730,17 +746,21 @@ impl Bus {
 
             // If counter reached 0, load next entry
             if new_count & 0x7F == 0 {
-                self.hdma_load_entry(ch);
+                cycles += self.hdma_load_entry(ch);
             } else {
                 // Continuous mode (bit 7): transfer every line
                 // Repeat mode: don't transfer until next entry
                 self.dma.channels[idx].hdma_do_transfer = counter & 0x80 != 0;
             }
         }
+
+        self.pending_dma_cycles += cycles;
     }
 
     /// Transfer data bytes for one HDMA channel on this scanline.
-    fn hdma_transfer(&mut self, ch: u8) {
+    /// Returns master cycles consumed (8 per byte: 1 read + 1 write = 2
+    /// bus accesses, but HDMA charges 8 per byte total, not per access).
+    fn hdma_transfer(&mut self, ch: u8) -> u64 {
         use crate::dma::{DMA_TRANSFER_PATTERNS, DMA_TRANSFER_SIZES};
 
         let idx = ch as usize;
@@ -773,5 +793,8 @@ impl Bus {
             // HDMA and CPU writes take the same code path.
             self.write(0x00, b_addr, val);
         }
+
+        // 8 master cycles per byte transferred (same as general DMA).
+        transfer_size as u64 * 8
     }
 }

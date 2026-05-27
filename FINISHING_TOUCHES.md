@@ -40,15 +40,12 @@ master cycles per access, matching bsnes/ares speed model. ~97 CPU bus access
 sites converted from flat ×6 to `Bus::cpu_read()`/`cpu_write()` wrappers that
 accumulate actual speed. Internal CPU cycles remain 6 each. Done 2026-05-27.
 
-### HDMA cycle accounting
-HDMA transfers currently consume zero CPU cycles. Real hardware charges
-~8 master cycles per byte transferred plus overhead per active channel.
-Games with heavy HDMA (Mode 7 effects, gradient bars) run too fast
-because the CPU gets free time it shouldn't have. Same issue as variable
-bus speed — changes timing, needs trace validation.
-
-**Files:** `src/bus.rs` (hdma_run_scanline)
-**Effort:** 1 session + Mesen2 trace diff
+### ~~HDMA cycle accounting~~ DONE
+HDMA now charges 8 master cycles per byte transferred, plus 8 cycles
+overhead per active channel per scanline, plus table read costs. Uses
+the same `pending_dma_cycles` mechanism as general DMA. FB hash
+unchanged; audio hash shifted (HDMA cycles change APU sync timing).
+Done 2026-05-27.
 
 ---
 

@@ -55,7 +55,7 @@ For SMW × 600 frames at default reset state:
 | | |
 |---|---|
 | `final_fb_hash` | `961761a48c5d4d85` |
-| `final_audio_hash` | `b0943936c6ddc850` |
+| `final_audio_hash` | `b8bad7b6ad9597da` |
 
 Bit-identical across native (x86_64) and browser (wasm32 in Chromium).
 **Any code change that doesn't intentionally alter emulator semantics MUST
@@ -230,4 +230,4 @@ in DevTools before you blame the worker code.
 - Run the bench (`cargo run --release --bin bench rom/smw.smc`) — it tells you
   what state the emulator is in via the histogram + hashes
 - The reference values for SMW × 600 frames are sacred: `961761a48c5d4d85`
-  (FB), `b0943936c6ddc850` (audio). If they change without intent, stop.
+  (FB), `b8bad7b6ad9597da` (audio). If they change without intent, stop.

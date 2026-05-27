@@ -272,7 +272,7 @@ These were identified in the architecture assessment but too large to apply in t
 
 4. ~~**[M] Variable bus speed**~~ -- **DONE**. Per-access 6/8/12 model wired in via `Bus::cpu_read()`/`cpu_write()` wrappers.
 
-5. **[M] HDMA cycle accounting** -- HDMA transfers consume zero cycles; real hardware charges ~8 per byte + overhead.
+5. ~~**[M] HDMA cycle accounting**~~ -- **DONE**. 8 cycles/byte + 8 overhead/channel/scanline, credited via `pending_dma_cycles`.
 
 6. ~~**[S] Deprecate `run_frame()`**~~ -- **DONE**. Marked `#[deprecated]`, bench.rs uses zero-copy path.
 
