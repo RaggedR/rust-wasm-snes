@@ -37,15 +37,20 @@ def check_port():
         resp = urllib.request.urlopen(
             f'http://127.0.0.1:{PORT}/', timeout=2)
         coep = resp.headers.get('Cross-Origin-Embedder-Policy', '')
+        resp.close()
         if coep:
-            print(f"WARNING: port {PORT} already has a COEP-enabled server. "
+            # Another serve.py (or equivalent) is already running with the
+            # right headers. Don't block — the developer may want two
+            # terminals (bench + play). Just warn and exit cleanly.
+            print(f"NOTE: port {PORT} already has a COEP-enabled server. "
                   "Is another serve.py running?", file=sys.stderr)
+            sys.exit(0)
         else:
             print(f"ERROR: port {PORT} is held by a server WITHOUT COEP headers.\n"
                   f"SharedArrayBuffer will be silently disabled.\n"
                   f"Kill it first:  lsof -ti:{PORT} | xargs kill -9",
                   file=sys.stderr)
-        sys.exit(1)
+            sys.exit(1)
     except Exception:
         print(f"WARNING: port {PORT} is in use but not responding to HTTP. "
               f"Kill it:  lsof -ti:{PORT} | xargs kill -9", file=sys.stderr)

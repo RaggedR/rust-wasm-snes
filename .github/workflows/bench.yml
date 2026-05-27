@@ -52,7 +52,7 @@ jobs:
       # only when an intentional emulator change shifts deterministic
       # output (and document why in the commit message).
       EXPECTED_FB_HASH: "961761a48c5d4d85"
-      EXPECTED_AUDIO_HASH: "b8bad7b6ad9597da"
+      EXPECTED_AUDIO_HASH: "cc7a761be049df76"
       BENCH_FRAMES: "600"
     steps:
       - uses: actions/checkout@v4

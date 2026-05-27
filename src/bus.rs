@@ -758,8 +758,9 @@ impl Bus {
     }
 
     /// Transfer data bytes for one HDMA channel on this scanline.
-    /// Returns master cycles consumed (8 per byte: 1 read + 1 write = 2
-    /// bus accesses, but HDMA charges 8 per byte total, not per access).
+    /// Returns master cycles consumed: 8 per byte, matching the general
+    /// DMA rate (hardware bundles each A-bus read + B-bus write pair as
+    /// a single 8-cycle transfer unit).
     fn hdma_transfer(&mut self, ch: u8) -> u64 {
         use crate::dma::{DMA_TRANSFER_PATTERNS, DMA_TRANSFER_SIZES};
 

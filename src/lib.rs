@@ -359,8 +359,18 @@ impl Emulator {
 
             // Render visible scanlines
             if scanline >= 1 && scanline <= VISIBLE_SCANLINES {
-                // Run HDMA before rendering each scanline
+                // Run HDMA before rendering each scanline.
                 self.bus.hdma_run_scanline();
+                // Credit HDMA cycles immediately — they happen during H-blank,
+                // before the next scanline's CPU execution. Leaving them in
+                // pending_dma_cycles would delay crediting by one scanline.
+                if self.bus.pending_dma_cycles > 0 {
+                    let hdma = self.bus.pending_dma_cycles;
+                    self.cpu.cycles += hdma;
+                    self.bus.master_clock = self.cpu.cycles;
+                    self.bus.sync_apu();
+                    self.bus.pending_dma_cycles = 0;
+                }
                 if !skip_render {
                     self.bus.ppu.render_scanline(scanline - 1);
                 }
