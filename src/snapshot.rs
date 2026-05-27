@@ -8,7 +8,7 @@
 /// **Format**:
 /// ```text
 /// 0..8    magic "SNES01\0\0"
-/// 8       version byte (currently 2)
+/// 8       version byte (currently 3)
 /// 9..     subsystem blobs in order: CPU, Bus, PPU, APU, SRAM
 /// ```
 ///

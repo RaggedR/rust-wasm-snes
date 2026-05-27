@@ -257,16 +257,11 @@ Each chip as an async task, memory access functions `.await` a scheduler:
 
 ## 8. Known Issues Deferred
 
-### Auto-Joypad Busy Period (C1 from async audit)
+### ~~Auto-Joypad Busy Period (C1 from async audit)~~ — FIXED
 
-**What**: Auto-joypad read at VBlank should take 4224 master cycles (~3.1
-scanlines). Currently it completes instantaneously.
-
-**Impact**: Games that don't poll $4212 bit 0 before reading $4218-$421F could
-read stale data on real hardware but get correct data from this emulator.
-
-**Why deferred**: Changes emulation semantics; needs game-by-game testing.
-Should be its own PR with a compatibility test matrix.
+Fixed in sweep 2: `auto_joypad_timer` counts down 4224 master cycles from
+VBlank start. $4212 bit 0 reads as 1 during the window. $4218/$4219 return
+the latched value captured at poll start. Snapshot VERSION bumped to 3.
 
 ### HDMA Timing (I1 from async audit)
 

@@ -14,7 +14,8 @@
 // integer division in the SPC700 clock derivation (master/21, then /32).
 // The ~80 Hz shortfall (~0.25%) is well within the ±0.5% DRC headroom.
 // The DRC compensates automatically; steady-state fillLevel settles at
-// approximately 0.375 rather than 0.5.
+// approximately 0.25 rather than 0.5 (solving: 31960 = (0.995 + 0.01 *
+// fillLevel) * 32040 gives fillLevel ≈ 0.25).
 //
 // Ring buffer layout (SharedArrayBuffer):
 //   bytes [0..3]    write_pos: Uint32 (Atomics, updated by worker)
