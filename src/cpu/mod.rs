@@ -246,6 +246,17 @@ impl Cpu {
         let skip = iterations * iter_cost;
         self.cycles += skip;
 
+        // Decrement auto-joypad busy timer by the skipped cycles. The
+        // frame loop can't do this because step() returns 0 for idle-skip.
+        if bus.auto_joypad_busy {
+            if skip >= bus.auto_joypad_timer as u64 {
+                bus.auto_joypad_timer = 0;
+                bus.auto_joypad_busy = false;
+            } else {
+                bus.auto_joypad_timer -= skip as u32;
+            }
+        }
+
         // PC is intentionally NOT advanced — we resume at the LDA. The
         // remaining few iterations cost ~30-60 master cycles total and
         // ensure the interrupt-pending check sees the same boundary it
@@ -320,11 +331,9 @@ impl Cpu {
         }
 
         // Idle-loop fast path (T10). Gated behind the `idle-skip` Cargo
-        // feature — off by default. CPU semantics are correct under this
-        // path (framebuffer hash preserved). The APU's absolute cycle target
-        // makes catch_up chunk-insensitive (distributive law holds), but
-        // audio still diverges under idle-skip due to stale APU port state
-        // during the bulk skip. See `docs/T10_IDLE_LOOP_DETECTION.md` §9.2.
+        // feature — off by default. Both FB and audio hashes are preserved:
+        // the skip advances self.cycles by an iteration-aligned amount and
+        // defers APU sync to end-of-scanline. See T10_IDLE_LOOP_DETECTION.md.
         #[cfg(feature = "idle-skip")]
         if let Some(skip) = self.try_idle_skip(bus) {
             return skip;

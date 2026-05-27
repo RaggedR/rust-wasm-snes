@@ -310,12 +310,9 @@ impl Emulator {
 
                 // Auto-joypad busy timer: decrement by elapsed master
                 // cycles. When it reaches 0 the busy flag clears and
-                // $4218/$4219 hold the final latched result.
-                // TODO(idle-skip): when idle-skip is enabled, cpu.step()
-                // returns 0 (skip cycles credited internally) so this
-                // timer is NOT decremented during bulk skips, artificially
-                // extending the busy window. Fix when idle-skip ships
-                // as default-on.
+                // $4218/$4219 hold the final latched result. During
+                // idle-skip, the timer is decremented inside try_idle_skip
+                // (step() returns 0, so this path adds nothing).
                 if self.bus.auto_joypad_busy {
                     if elapsed as u32 >= self.bus.auto_joypad_timer {
                         self.bus.auto_joypad_timer = 0;
