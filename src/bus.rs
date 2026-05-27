@@ -5,7 +5,7 @@
 /// appropriate component: ROM, WRAM, PPU, APU, DMA, or CPU registers.
 
 use crate::spc700::Apu;
-use crate::dma::{self, Dma};
+use crate::dma::Dma;
 use crate::joypad::Joypad;
 use crate::ppu::Ppu;
 use crate::rom::{Cartridge, MapMode};
