@@ -633,3 +633,167 @@ preserved. Option 1 is the principled fix but is a multi-session refactor.
 - 88,597 hits in 600 frames (~148 hits/frame)
 
 The win is real; the determinism contract isn't. Worth picking back up.
+
+---
+
+## 9. Update: Categorical analysis and partial fix (2026-05-27)
+
+A directed container analysis (Ahman-Chapman-Uustalu 2014) of the emulator's
+composition structure diagnosed the audio divergence as two separate problems,
+one of which is now fixed.
+
+### 9.1 The chunking problem is fixed
+
+The cycle-debt mechanism described in §8 ("Why naive chunk simulation isn't
+enough") was a **distributive law violation**. The CPU and APU are independent
+directed containers (stream comonads) on different clocks. The `catch_up` call
+is the distributive law `λ : T_APU ∘ T_CPU → T_CPU ∘ T_APU`. Coherence
+condition 3 requires:
+
+```
+catch_up(a + b) = catch_up(a); catch_up(b)
+```
+
+The relative `cycle_debt: i64` violated this because `debt(a + b) ≠
+debt(a) + debt(b)` — the signed carryover from instruction overshoot shifted
+SPC instruction boundaries depending on the chunking pattern.
+
+**Fix implemented:** Replaced `cycle_debt` with `cycle_target: u64` — an
+absolute cycle target that accumulates monotonically. `run_cycles` now runs
+until `self.cycles >= self.cycle_target`. Since the target is the same
+regardless of how cycles are delivered, the distributive law holds by
+construction.
+
+This is Option 1 from §8 ("Make run_cycles chunk-deterministic"), achieved
+without mid-instruction yielding. The key insight: the old code's loop
+condition `while self.cycle_debt > 0` was equivalent to `while self.cycles <
+self.cycle_target` — but `cycle_target` is a monotonic accumulator while
+`cycle_debt` was a signed difference that lost information about the absolute
+position.
+
+**Verification:** Five law tests in `tests/categorical/distributive_law.rs`
+confirm chunk-insensitivity, including an extreme test delivering one master
+cycle at a time.
+
+**Determinism contract preserved:** Without idle-skip, both ROMs produce
+identical hashes to the sacred contract:
+- SMW: `fb=54b3eed74f9f8432` ✓, `audio=62300ecfc4da23e0` ✓
+- Zelda: `fb=56f518f3c4417b95`, `audio=a690bcee07540632`
+
+The idle-skip APU drive was also simplified: the chunked loop that delivered
+`SIMULATED_STEP_CYCLES` (18) at a time was replaced with a single
+`bus.apu.catch_up(skip as u32)`, since chunking no longer matters.
+
+### 9.2 The interaction problem remains
+
+With idle-skip enabled, audio and (on SMW) framebuffer hashes still diverge:
+
+| ROM | Mode | FB Hash | Audio Hash |
+|-----|------|---------|------------|
+| SMW | no skip | `54b3eed74f9f8432` ✓ | `62300ecfc4da23e0` ✓ |
+| SMW | idle-skip | `cfcd078d948adbf7` ✗ | `5488f05e69433dc7` ✗ |
+| Zelda | no skip | `56f518f3c4417b95` | `a690bcee07540632` |
+| Zelda | idle-skip | `56f518f3c4417b95` ✓ | `2f772140bd859776` ✗ |
+
+Zelda's FB hash is preserved (skip is less aggressive: 32% of cycles vs 52%),
+but audio diverges on both ROMs. The §8 diagnosis still holds: **the FB
+divergence is downstream of the audio divergence** (audio shift → port timing
+shift → CPU branch divergence → PPU register write differs).
+
+The remaining problem is NOT chunking (that's fixed). It's that idle-skip
+changes the **interleaving** of CPU and APU execution:
+
+**Non-skip path:**
+```
+cpu.step(6)  → apu.catch_up(6)    // CPU may write APU ports here
+cpu.step(12) → apu.catch_up(12)   // and here
+cpu.step(6)  → apu.catch_up(6)    // and here
+... (hundreds of interleaved steps per scanline)
+```
+
+**Idle-skip path:**
+```
+apu.catch_up(skip)                 // APU runs bulk, no CPU port writes
+cpu.step(6)  → apu.catch_up(6)    // tail iterations only
+cpu.step(12) → apu.catch_up(12)
+```
+
+The APU reaches the same total cycle count, but during the bulk skip, the
+SPC700 music driver reads its I/O ports (`$F4-$F7`) and sees stale values —
+the CPU port writes that would have happened during those cycles didn't occur.
+The music driver's handshake protocol processes commands at different SPC cycle
+positions, producing different DSP sample timing.
+
+This is not a distributive law violation — the distributive law is about
+delivering the *same operations* in different chunks. Idle-skip delivers
+*different operations* (no port writes during the skip span). The chunking
+fix was a necessary precondition, but the interaction problem is orthogonal.
+
+### 9.3 Remaining fix candidates
+
+The original §8 options are revised:
+
+- **Option 1 (chunk-deterministic) — DONE.** `cycle_debt` → `cycle_target`.
+- **Option 2 (match chunk distribution) — OBSOLETE.** Chunk distribution
+  doesn't matter anymore; the distributive law holds for any chunking.
+- **Option 3 (skip across scanline boundaries) — STILL VALID** but doesn't
+  address the interaction problem.
+- **Option 4 (re-baseline) — STILL VALID** as the pragmatic path.
+
+New candidates for the interaction problem:
+
+5. **Port-write guard.** Before skipping, check whether the idle loop body
+   (or the code surrounding it) writes to APU ports ($2140–$2143) within the
+   skip span. If it does, don't skip. This is conservative — it would reject
+   some legitimate skips — but it's correct. Difficulty: the loop body itself
+   (`LDA dp; BEQ -4`) doesn't write ports; the writes happen in the code
+   that runs *after* the loop exits, which is exactly the code that runs in
+   the tail iterations. The interaction timing shift comes from the APU
+   running ahead of where it would be if the CPU had been stepping alongside
+   it.
+
+6. **Freeze APU ports during skip.** Snapshot `ports_from_main` before the
+   skip, restore after. The APU runs with the port values frozen at their
+   pre-skip state, which is what the non-skip path would deliver (the CPU
+   is in a tight poll loop and not writing to ports). This is only correct
+   if the polling loop genuinely doesn't write to $2140–$2143 — which is
+   true for the Tier 1 pattern (LDA dp / BEQ is a 2-instruction loop with
+   no store).
+
+7. **Lazy APU sync.** Don't advance the APU during the skip at all. Instead,
+   let the APU "owe" cycles that will be caught up during the tail iterations
+   and subsequent CPU steps. With the absolute cycle target, the APU will
+   eventually run to the correct position. Risk: if the APU falls too far
+   behind, port handshake timing shifts anyway.
+
+Option 6 is the most promising — it preserves the APU's view of the ports
+while letting it advance in time, which is exactly what happens in the
+non-skip path (the CPU is in a tight poll loop, not touching ports).
+
+### 9.4 Categorical framing
+
+The full composition analysis is documented in `docs/container-ghani.md`.
+Summary of the six composition sites:
+
+| # | Composition | Type | Status |
+|---|---|---|---|
+| 1 | CPU ∘ Bus | Co-Kleisli | ✓ |
+| 2 | CPU ∥ APU | Distributive law | ✓ FIXED (§9.1) |
+| 3 | CPU ; DMA | Degenerate sequential | ✓ |
+| 4 | DMA → PPU | Container morphism | ✓ FIXED (factored through Bus) |
+| 5 | HDMA → PPU | Kleisli composition | ✓ |
+| 6 | Frame | Nested Writer monad | ✓ |
+
+All six composition sites are now structurally correct. The remaining
+idle-skip audio divergence is not a composition law violation — it's an
+assumption violation in the skip mechanism itself (the skip assumes no
+CPU-APU interaction during the span).
+
+### 9.5 Performance (post-fix)
+
+| ROM | Mode | Emulated FPS | Idle Hits | Cycles Skipped |
+|-----|------|-------------|-----------|----------------|
+| SMW | no skip | 907 | — | — |
+| SMW | idle-skip | 999 (+10%) | 88,597 | 52% |
+| Zelda | no skip | — | — | — |
+| Zelda | idle-skip | — | 55,529 | 32% |

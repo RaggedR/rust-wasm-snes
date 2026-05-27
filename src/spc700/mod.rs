@@ -182,10 +182,13 @@ pub struct Apu {
     pub cycles: u64,
     /// Fractional cycle accumulator for precise main→SPC timing.
     pub cycle_frac: u32,
-    /// Cycle debt: positive = SPC needs to run, negative = SPC ran ahead.
-    /// This prevents overshoot amplification when catch_up is called frequently
-    /// with small cycle counts.
-    cycle_debt: i64,
+    /// Absolute cycle target — the APU must run until self.cycles reaches
+    /// this value. Using an absolute target instead of relative debt makes
+    /// run_cycles chunk-insensitive: run_cycles(50); run_cycles(50) produces
+    /// identical SPC instruction sequences to run_cycles(100), because the
+    /// target is the same either way. This is the distributive law for the
+    /// CPU ∥ APU composition: catch_up(a+b) = catch_up(a); catch_up(b).
+    cycle_target: u64,
     /// DSP sample counter (one stereo sample per 32 SPC cycles).
     dsp_counter: u32,
     /// Audio output buffer (interleaved stereo i16: L, R, L, R, ...).
@@ -201,7 +204,7 @@ impl Apu {
             bus: ApuBus::new(),
             cycles: 0,
             cycle_frac: 0,
-            cycle_debt: 0,
+            cycle_target: 0,
             dsp_counter: 0,
             sample_buffer: Vec::with_capacity(2048),
             output_filter: OutputFilter::new(),
@@ -266,7 +269,7 @@ impl Apu {
         // Reset timing and filter state.
         self.cycles = 0;
         self.cycle_frac = 0;
-        self.cycle_debt = 0;
+        self.cycle_target = 0;
         self.dsp_counter = 0;
         self.sample_buffer.clear();
         self.output_filter = OutputFilter::new();
@@ -274,22 +277,23 @@ impl Apu {
 
     /// Run the APU for the given number of SPC700 cycles.
     ///
-    /// Uses a cycle-debt approach: the debt accumulates requested cycles,
-    /// and instructions that overshoot drive the debt negative. This prevents
-    /// the ~4x amplification bug where frequent small calls (e.g., 1 SPC cycle)
-    /// each run a full instruction (4+ cycles) without compensating for overshoot.
+    /// Uses an absolute cycle target: the target accumulates monotonically,
+    /// and instructions run until self.cycles >= target. This makes run_cycles
+    /// chunk-insensitive — run_cycles(50); run_cycles(50) produces identical
+    /// SPC instruction sequences to run_cycles(100), because the final target
+    /// is the same either way. This is the distributive law for the CPU ∥ APU
+    /// composition: the APU's state after N total cycles is independent of
+    /// how those N cycles were delivered.
     pub fn run_cycles(&mut self, target_cycles: u32) {
-        self.cycle_debt += target_cycles as i64;
+        self.cycle_target += target_cycles as u64;
 
-        while self.cycle_debt > 0 {
+        while self.cycles < self.cycle_target {
             // Execute one SPC700 instruction (each takes multiple cycles).
             let inst_cycles = if !self.cpu.halted {
-                self.cpu.step(&mut self.bus) as i64
+                self.cpu.step(&mut self.bus) as u64
             } else {
                 1 // Advance time even when halted
             };
-
-            self.cycle_debt -= inst_cycles;
 
             // Tick timers and DSP for each cycle consumed by this instruction.
             for _ in 0..inst_cycles {
@@ -344,9 +348,26 @@ impl Apu {
         std::mem::take(&mut self.sample_buffer)
     }
 
+    /// Dump DSP voice state for audio debugging.
+    pub fn dump_dsp_voices(&self) -> String {
+        self.bus.dsp.dump_voices()
+    }
+
+    /// Drain the DSP debug log, returning all entries joined by newlines.
+    pub fn drain_dsp_debug(&mut self) -> String {
+        let log = self.bus.dsp.debug_log.join("\n");
+        self.bus.dsp.debug_log.clear();
+        log
+    }
+
+    /// Read a DSP register (for debug display).
+    pub fn dsp_reg(&self, addr: u8) -> u8 {
+        self.bus.dsp.regs[addr as usize & 0x7F]
+    }
+
     // ── Snapshot / restore ──────────────────────────────────────────
     //
-    // The APU has private fields (`output_filter`, `cycle_debt`, …) so
+    // The APU has private fields (`output_filter`, `cycle_target`, …) so
     // its serializer lives here. The format is fixed-layout binary —
     // see `snapshot.rs` for the overall scheme.
 
@@ -382,7 +403,7 @@ impl Apu {
         // ── Apu top-level ──
         out.extend_from_slice(&self.cycles.to_le_bytes());
         out.extend_from_slice(&self.cycle_frac.to_le_bytes());
-        out.extend_from_slice(&self.cycle_debt.to_le_bytes());
+        out.extend_from_slice(&self.cycle_target.to_le_bytes());
         out.extend_from_slice(&self.dsp_counter.to_le_bytes());
         // Sample buffer (length-prefixed). Each sample is 2 bytes.
         out.extend_from_slice(&(self.sample_buffer.len() as u32).to_le_bytes());
@@ -449,7 +470,7 @@ impl Apu {
         // Apu top-level
         self.cycles = u64::from_le_bytes(take!(8).try_into().unwrap());
         self.cycle_frac = u32::from_le_bytes(take!(4).try_into().unwrap());
-        self.cycle_debt = i64::from_le_bytes(take!(8).try_into().unwrap());
+        self.cycle_target = u64::from_le_bytes(take!(8).try_into().unwrap());
         self.dsp_counter = u32::from_le_bytes(take!(4).try_into().unwrap());
 
         let nsamp = u32::from_le_bytes(take!(4).try_into().unwrap()) as usize;

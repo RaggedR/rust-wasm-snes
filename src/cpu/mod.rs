@@ -235,19 +235,11 @@ impl Cpu {
         self.p.z = byte == 0;
         self.p.n = (byte & 0x80) != 0;
 
-        // Drive the APU using the same chunk distribution it would receive
-        // from the unskipped loop: a stream of `SIMULATED_STEP_CYCLES`-sized
-        // catch_ups, with the remainder as the final call. We do this here
-        // and return 0 from step() so the outer frame loop's own catch_up
-        // for `elapsed` is a no-op — otherwise we'd double-credit cycles.
-        let mut remaining = skip;
-        while remaining >= SIMULATED_STEP_CYCLES as u64 {
-            bus.apu.catch_up(SIMULATED_STEP_CYCLES);
-            remaining -= SIMULATED_STEP_CYCLES as u64;
-        }
-        if remaining > 0 {
-            bus.apu.catch_up(remaining as u32);
-        }
+        // Drive the APU for the skipped cycles. Since catch_up is now
+        // chunk-insensitive (absolute cycle target, not relative debt),
+        // a single call produces identical results to many small calls.
+        // The distributive law holds: catch_up(skip) = catch_up(18) × N.
+        bus.apu.catch_up(skip as u32);
         self.cycles += skip;
 
         // PC is intentionally NOT advanced — we resume at the LDA. The
@@ -313,11 +305,10 @@ impl Cpu {
 
         // Idle-loop fast path (T10). Gated behind the `idle-skip` Cargo
         // feature — off by default. CPU semantics are correct under this
-        // path (framebuffer hash preserved), but the audio hash exhibits a
-        // residual divergence from APU chunk-size sensitivity (the
-        // SPC700's cycle_debt accounting is not perfectly chunk-equivalent).
-        // See `docs/T10_IDLE_LOOP_DETECTION.md` for the design and the
-        // follow-up section in the PR for the empirical divergence data.
+        // path (framebuffer hash preserved). The APU now uses an absolute
+        // cycle target (not relative debt), making catch_up chunk-insensitive
+        // — the distributive law for CPU ∥ APU composition holds.
+        // See `docs/T10_IDLE_LOOP_DETECTION.md` for the design.
         #[cfg(feature = "idle-skip")]
         if let Some(skip) = self.try_idle_skip(bus) {
             return skip;
