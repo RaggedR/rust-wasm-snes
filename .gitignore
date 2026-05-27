@@ -6,3 +6,4 @@ rom/
 *.smc
 *.sfc
 .DS_Store
+bench/dumps/
