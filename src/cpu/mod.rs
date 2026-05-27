@@ -109,10 +109,6 @@ pub struct Cpu {
     /// Number of times the idle-loop fast path fired cleanly. Diagnostic only.
     pub idle_skip_hits: u64,
 
-    /// Number of times idle-skip aborted because the APU wrote to a port
-    /// during the bulk catch_up. Diagnostic — this counter tells you whether
-    /// the port-write guard is ever triggering.
-
     /// Cumulative master cycles skipped by the idle-loop fast path. Diagnostic.
     pub idle_skip_cycles: u64,
 }
