@@ -44,6 +44,39 @@ pub struct Dma {
     pub channels: [DmaChannel; 8],
 }
 
+impl DmaChannel {
+    pub fn snapshot_write(&self, out: &mut Vec<u8>) {
+        use crate::snapshot::*;
+        w_u8(out, self.control);
+        w_u8(out, self.dest);
+        w_u16(out, self.src_addr);
+        w_u8(out, self.src_bank);
+        w_u16(out, self.size);
+        w_u8(out, self.hdma_indirect_bank);
+        w_u16(out, self.hdma_addr);
+        w_u8(out, self.hdma_line_counter);
+        w_u8(out, self.unused);
+        w_bool(out, self.hdma_terminated);
+        w_bool(out, self.hdma_do_transfer);
+    }
+
+    pub fn snapshot_read(&mut self, r: &mut &[u8]) -> Result<(), String> {
+        use crate::snapshot::*;
+        self.control = r_u8(r)?;
+        self.dest = r_u8(r)?;
+        self.src_addr = r_u16(r)?;
+        self.src_bank = r_u8(r)?;
+        self.size = r_u16(r)?;
+        self.hdma_indirect_bank = r_u8(r)?;
+        self.hdma_addr = r_u16(r)?;
+        self.hdma_line_counter = r_u8(r)?;
+        self.unused = r_u8(r)?;
+        self.hdma_terminated = r_bool(r)?;
+        self.hdma_do_transfer = r_bool(r)?;
+        Ok(())
+    }
+}
+
 impl Default for Dma {
     fn default() -> Self { Self::new() }
 }
@@ -53,6 +86,15 @@ impl Dma {
         Self {
             channels: [DmaChannel::default(); 8],
         }
+    }
+
+    pub fn snapshot_write(&self, out: &mut Vec<u8>) {
+        for ch in &self.channels { ch.snapshot_write(out); }
+    }
+
+    pub fn snapshot_read(&mut self, r: &mut &[u8]) -> Result<(), String> {
+        for ch in &mut self.channels { ch.snapshot_read(r)?; }
+        Ok(())
     }
 
     /// Read a DMA register ($4300-$437F).

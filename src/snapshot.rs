@@ -25,11 +25,10 @@
 // keeps the format strictly sequential and trivially auditable.
 
 use crate::Emulator;
-use crate::cpu::{Cpu, StatusRegister};
+use crate::cpu::Cpu;
 use crate::bus::Bus;
-use crate::dma::{Dma, DmaChannel};
 use crate::joypad::Joypad;
-use crate::ppu::{Ppu, BgLayer};
+use crate::ppu::Ppu;
 const MAGIC: &[u8; 8] = b"SNES01\0\0";
 /// V4: APU field `cycle_frac: u32` replaced with `master_cycles_total: u64`
 ///     (distributive catch_up fix — 4 bytes wider).
@@ -90,109 +89,17 @@ pub(crate) fn r_bytes_vec(r: &mut &[u8]) -> Result<Vec<u8>, String> {
     Ok(v)
 }
 
-// ─── StatusRegister ─────────────────────────────────────────────────────
-
-fn write_status(out: &mut Vec<u8>, p: &StatusRegister) {
-    // Pack into a single byte (native mode encoding has all 8 bits).
-    let mut b = 0u8;
-    if p.n { b |= 0x80; }
-    if p.v { b |= 0x40; }
-    if p.m { b |= 0x20; }
-    if p.x { b |= 0x10; }
-    if p.d { b |= 0x08; }
-    if p.i { b |= 0x04; }
-    if p.z { b |= 0x02; }
-    if p.c { b |= 0x01; }
-    out.push(b);
-}
-fn read_status(r: &mut &[u8]) -> Result<StatusRegister, String> {
-    let b = r_u8(r)?;
-    Ok(StatusRegister {
-        n: b & 0x80 != 0,
-        v: b & 0x40 != 0,
-        m: b & 0x20 != 0,
-        x: b & 0x10 != 0,
-        d: b & 0x08 != 0,
-        i: b & 0x04 != 0,
-        z: b & 0x02 != 0,
-        c: b & 0x01 != 0,
-    })
-}
-
 // ─── CPU ────────────────────────────────────────────────────────────────
+// Serialization lives on Cpu::snapshot_write / Cpu::snapshot_read in src/cpu/mod.rs.
 
-fn write_cpu(out: &mut Vec<u8>, cpu: &Cpu) {
-    w_u16(out, cpu.a);
-    w_u16(out, cpu.x);
-    w_u16(out, cpu.y);
-    w_u16(out, cpu.sp);
-    w_u16(out, cpu.dp);
-    w_u16(out, cpu.pc);
-    w_u8(out, cpu.pbr);
-    w_u8(out, cpu.dbr);
-    write_status(out, &cpu.p);
-    w_bool(out, cpu.emulation);
-    w_u64(out, cpu.cycles);
-    w_bool(out, cpu.nmi_pending);
-    w_bool(out, cpu.irq_pending);
-    w_bool(out, cpu.stopped);
-    w_bool(out, cpu.waiting);
-}
-fn read_cpu(r: &mut &[u8], cpu: &mut Cpu) -> Result<(), String> {
-    cpu.a = r_u16(r)?;
-    cpu.x = r_u16(r)?;
-    cpu.y = r_u16(r)?;
-    cpu.sp = r_u16(r)?;
-    cpu.dp = r_u16(r)?;
-    cpu.pc = r_u16(r)?;
-    cpu.pbr = r_u8(r)?;
-    cpu.dbr = r_u8(r)?;
-    cpu.p = read_status(r)?;
-    cpu.emulation = r_bool(r)?;
-    cpu.cycles = r_u64(r)?;
-    cpu.nmi_pending = r_bool(r)?;
-    cpu.irq_pending = r_bool(r)?;
-    cpu.stopped = r_bool(r)?;
-    cpu.waiting = r_bool(r)?;
-    Ok(())
-}
+fn write_cpu(out: &mut Vec<u8>, cpu: &Cpu) { cpu.snapshot_write(out); }
+fn read_cpu(r: &mut &[u8], cpu: &mut Cpu) -> Result<(), String> { cpu.snapshot_read(r) }
 
 // ─── DMA ────────────────────────────────────────────────────────────────
+// Serialization lives on Dma::snapshot_write / Dma::snapshot_read in src/dma.rs.
 
-fn write_dma(out: &mut Vec<u8>, dma: &Dma) {
-    for ch in &dma.channels { write_dma_channel(out, ch); }
-}
-fn write_dma_channel(out: &mut Vec<u8>, c: &DmaChannel) {
-    w_u8(out, c.control);
-    w_u8(out, c.dest);
-    w_u16(out, c.src_addr);
-    w_u8(out, c.src_bank);
-    w_u16(out, c.size);
-    w_u8(out, c.hdma_indirect_bank);
-    w_u16(out, c.hdma_addr);
-    w_u8(out, c.hdma_line_counter);
-    w_u8(out, c.unused);
-    w_bool(out, c.hdma_terminated);
-    w_bool(out, c.hdma_do_transfer);
-}
-fn read_dma(r: &mut &[u8], dma: &mut Dma) -> Result<(), String> {
-    for ch in &mut dma.channels { read_dma_channel(r, ch)?; }
-    Ok(())
-}
-fn read_dma_channel(r: &mut &[u8], c: &mut DmaChannel) -> Result<(), String> {
-    c.control = r_u8(r)?;
-    c.dest = r_u8(r)?;
-    c.src_addr = r_u16(r)?;
-    c.src_bank = r_u8(r)?;
-    c.size = r_u16(r)?;
-    c.hdma_indirect_bank = r_u8(r)?;
-    c.hdma_addr = r_u16(r)?;
-    c.hdma_line_counter = r_u8(r)?;
-    c.unused = r_u8(r)?;
-    c.hdma_terminated = r_bool(r)?;
-    c.hdma_do_transfer = r_bool(r)?;
-    Ok(())
-}
+fn write_dma(out: &mut Vec<u8>, dma: &crate::dma::Dma) { dma.snapshot_write(out); }
+fn read_dma(r: &mut &[u8], dma: &mut crate::dma::Dma) -> Result<(), String> { dma.snapshot_read(r) }
 
 // ─── Joypad ─────────────────────────────────────────────────────────────
 
@@ -208,188 +115,14 @@ fn read_joypad(r: &mut &[u8], j: &mut Joypad) -> Result<(), String> {
 }
 
 // ─── PPU ────────────────────────────────────────────────────────────────
-
-fn write_bg(out: &mut Vec<u8>, bg: &BgLayer) {
-    w_u16(out, bg.tilemap_addr);
-    w_u8(out, bg.tilemap_size);
-    w_u16(out, bg.chr_addr);
-    w_u16(out, bg.hscroll);
-    w_u16(out, bg.vscroll);
-    w_bool(out, bg.tile_size);
-}
-fn read_bg(r: &mut &[u8], bg: &mut BgLayer) -> Result<(), String> {
-    bg.tilemap_addr = r_u16(r)?;
-    bg.tilemap_size = r_u8(r)?;
-    bg.chr_addr = r_u16(r)?;
-    bg.hscroll = r_u16(r)?;
-    bg.vscroll = r_u16(r)?;
-    bg.tile_size = r_bool(r)?;
-    Ok(())
-}
+// Serialization logic lives on Ppu::snapshot_write / Ppu::snapshot_read
+// and BgLayer::snapshot_write / BgLayer::snapshot_read in src/ppu/mod.rs.
 
 fn write_ppu(out: &mut Vec<u8>, ppu: &Ppu) {
-    // Memory blocks
-    w_bytes(out, &*ppu.vram);
-    w_bytes(out, &*ppu.oam);
-    w_bytes(out, &*ppu.cgram);
-
-    // Display control
-    w_u8(out, ppu.inidisp);
-    w_u8(out, ppu.bgmode);
-    w_u8(out, ppu.mosaic);
-    for bg in &ppu.bg { write_bg(out, bg); }
-
-    // VRAM access
-    w_u16(out, ppu.vram_addr);
-    w_u8(out, ppu.vram_increment);
-    w_u16(out, ppu.vram_prefetch);
-    w_u8(out, ppu.vram_remap);
-
-    // CGRAM access
-    w_u8(out, ppu.cgram_addr);
-    w_u8(out, ppu.cgram_latch);
-    w_bool(out, ppu.cgram_flipflop);
-
-    // OAM access
-    w_u16(out, ppu.oam_addr);
-    w_u16(out, ppu.oam_internal_addr);
-    w_u8(out, ppu.oam_latch);
-    w_bool(out, ppu.oam_flipflop);
-    w_u8(out, ppu.obj_size);
-    w_u16(out, ppu.obj_base);
-    w_u16(out, ppu.obj_name_select);
-
-    // Scroll latches
-    w_u8(out, ppu.scroll_latch);
-    w_u8(out, ppu.bghofs_latch);
-
-    // Mode 7
-    w_i16(out, ppu.m7a);
-    w_i16(out, ppu.m7b);
-    w_i16(out, ppu.m7c);
-    w_i16(out, ppu.m7d);
-    w_i16(out, ppu.m7x);
-    w_i16(out, ppu.m7y);
-    w_u8(out, ppu.m7_latch);
-    w_i16(out, ppu.m7_hofs);
-    w_i16(out, ppu.m7_vofs);
-
-    // Screen designation
-    w_u8(out, ppu.tm);
-    w_u8(out, ppu.ts);
-    w_u8(out, ppu.tmw);
-    w_u8(out, ppu.tsw);
-
-    // Color math
-    w_u8(out, ppu.cgwsel);
-    w_u8(out, ppu.cgadsub);
-    w_u8(out, ppu.fixed_color_r);
-    w_u8(out, ppu.fixed_color_g);
-    w_u8(out, ppu.fixed_color_b);
-
-    // Window
-    w_u8(out, ppu.w1_left);
-    w_u8(out, ppu.w1_right);
-    w_u8(out, ppu.w2_left);
-    w_u8(out, ppu.w2_right);
-    w_u8(out, ppu.wbglog);
-    w_u8(out, ppu.wobjlog);
-    w_u8(out, ppu.w12sel);
-    w_u8(out, ppu.w34sel);
-    w_u8(out, ppu.wobjsel);
-
-    // Rendering state
-    w_u16(out, ppu.scanline);
-    // Framebuffer is recomputable but we include it so a mid-frame
-    // snapshot/restore is bit-exact.
-    let fb_bytes: Vec<u8> = ppu.frame_buffer.iter()
-        .flat_map(|p| p.to_le_bytes())
-        .collect();
-    w_bytes(out, &fb_bytes);
-
-    // Status
-    w_bool(out, ppu.latch_hv);
-    w_u16(out, ppu.ophct);
-    w_u16(out, ppu.opvct);
-    w_bool(out, ppu.ophct_flipflop);
-    w_bool(out, ppu.opvct_flipflop);
+    ppu.snapshot_write(out);
 }
 fn read_ppu(r: &mut &[u8], ppu: &mut Ppu) -> Result<(), String> {
-    r_bytes_into(r, &mut *ppu.vram)?;
-    r_bytes_into(r, &mut *ppu.oam)?;
-    r_bytes_into(r, &mut *ppu.cgram)?;
-
-    ppu.inidisp = r_u8(r)?;
-    ppu.bgmode = r_u8(r)?;
-    ppu.mosaic = r_u8(r)?;
-    for bg in &mut ppu.bg { read_bg(r, bg)?; }
-
-    ppu.vram_addr = r_u16(r)?;
-    ppu.vram_increment = r_u8(r)?;
-    ppu.vram_prefetch = r_u16(r)?;
-    ppu.vram_remap = r_u8(r)?;
-
-    ppu.cgram_addr = r_u8(r)?;
-    ppu.cgram_latch = r_u8(r)?;
-    ppu.cgram_flipflop = r_bool(r)?;
-
-    ppu.oam_addr = r_u16(r)?;
-    ppu.oam_internal_addr = r_u16(r)?;
-    ppu.oam_latch = r_u8(r)?;
-    ppu.oam_flipflop = r_bool(r)?;
-    ppu.obj_size = r_u8(r)?;
-    ppu.obj_base = r_u16(r)?;
-    ppu.obj_name_select = r_u16(r)?;
-
-    ppu.scroll_latch = r_u8(r)?;
-    ppu.bghofs_latch = r_u8(r)?;
-
-    ppu.m7a = r_i16(r)?;
-    ppu.m7b = r_i16(r)?;
-    ppu.m7c = r_i16(r)?;
-    ppu.m7d = r_i16(r)?;
-    ppu.m7x = r_i16(r)?;
-    ppu.m7y = r_i16(r)?;
-    ppu.m7_latch = r_u8(r)?;
-    ppu.m7_hofs = r_i16(r)?;
-    ppu.m7_vofs = r_i16(r)?;
-
-    ppu.tm = r_u8(r)?;
-    ppu.ts = r_u8(r)?;
-    ppu.tmw = r_u8(r)?;
-    ppu.tsw = r_u8(r)?;
-
-    ppu.cgwsel = r_u8(r)?;
-    ppu.cgadsub = r_u8(r)?;
-    ppu.fixed_color_r = r_u8(r)?;
-    ppu.fixed_color_g = r_u8(r)?;
-    ppu.fixed_color_b = r_u8(r)?;
-
-    ppu.w1_left = r_u8(r)?;
-    ppu.w1_right = r_u8(r)?;
-    ppu.w2_left = r_u8(r)?;
-    ppu.w2_right = r_u8(r)?;
-    ppu.wbglog = r_u8(r)?;
-    ppu.wobjlog = r_u8(r)?;
-    ppu.w12sel = r_u8(r)?;
-    ppu.w34sel = r_u8(r)?;
-    ppu.wobjsel = r_u8(r)?;
-
-    ppu.scanline = r_u16(r)?;
-    let fb_bytes = r_bytes_vec(r)?;
-    if fb_bytes.len() != ppu.frame_buffer.len() * 4 {
-        return Err("snapshot: framebuffer size mismatch".into());
-    }
-    for (i, chunk) in fb_bytes.chunks_exact(4).enumerate() {
-        ppu.frame_buffer[i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-    }
-
-    ppu.latch_hv = r_bool(r)?;
-    ppu.ophct = r_u16(r)?;
-    ppu.opvct = r_u16(r)?;
-    ppu.ophct_flipflop = r_bool(r)?;
-    ppu.opvct_flipflop = r_bool(r)?;
-    Ok(())
+    ppu.snapshot_read(r)
 }
 
 // ─── Bus ────────────────────────────────────────────────────────────────

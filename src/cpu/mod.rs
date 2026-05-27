@@ -526,4 +526,65 @@ impl Cpu {
         let hi = self.pull_byte(bus) as u16;
         lo | (hi << 8)
     }
+
+    // ── Snapshot serialization ──────────────────────────────────────
+
+    pub fn snapshot_write(&self, out: &mut Vec<u8>) {
+        use crate::snapshot::*;
+        w_u16(out, self.a);
+        w_u16(out, self.x);
+        w_u16(out, self.y);
+        w_u16(out, self.sp);
+        w_u16(out, self.dp);
+        w_u16(out, self.pc);
+        w_u8(out, self.pbr);
+        w_u8(out, self.dbr);
+        // Pack StatusRegister into one byte
+        let mut pb = 0u8;
+        if self.p.n { pb |= 0x80; }
+        if self.p.v { pb |= 0x40; }
+        if self.p.m { pb |= 0x20; }
+        if self.p.x { pb |= 0x10; }
+        if self.p.d { pb |= 0x08; }
+        if self.p.i { pb |= 0x04; }
+        if self.p.z { pb |= 0x02; }
+        if self.p.c { pb |= 0x01; }
+        out.push(pb);
+        w_bool(out, self.emulation);
+        w_u64(out, self.cycles);
+        w_bool(out, self.nmi_pending);
+        w_bool(out, self.irq_pending);
+        w_bool(out, self.stopped);
+        w_bool(out, self.waiting);
+    }
+
+    pub fn snapshot_read(&mut self, r: &mut &[u8]) -> Result<(), String> {
+        use crate::snapshot::*;
+        self.a = r_u16(r)?;
+        self.x = r_u16(r)?;
+        self.y = r_u16(r)?;
+        self.sp = r_u16(r)?;
+        self.dp = r_u16(r)?;
+        self.pc = r_u16(r)?;
+        self.pbr = r_u8(r)?;
+        self.dbr = r_u8(r)?;
+        let b = r_u8(r)?;
+        self.p = StatusRegister {
+            n: b & 0x80 != 0,
+            v: b & 0x40 != 0,
+            m: b & 0x20 != 0,
+            x: b & 0x10 != 0,
+            d: b & 0x08 != 0,
+            i: b & 0x04 != 0,
+            z: b & 0x02 != 0,
+            c: b & 0x01 != 0,
+        };
+        self.emulation = r_bool(r)?;
+        self.cycles = r_u64(r)?;
+        self.nmi_pending = r_bool(r)?;
+        self.irq_pending = r_bool(r)?;
+        self.stopped = r_bool(r)?;
+        self.waiting = r_bool(r)?;
+        Ok(())
+    }
 }
