@@ -165,9 +165,16 @@ impl Emulator {
         self.cpu.opcode_counts.to_vec()
     }
 
-    /// Diagnostic: number of times the idle-loop fast path fired.
+    /// Diagnostic: number of times the idle-loop fast path fired cleanly.
     pub fn idle_skip_hits(&self) -> u64 {
         self.cpu.idle_skip_hits
+    }
+
+    /// Diagnostic: number of times idle-skip aborted because the APU wrote
+    /// to a port during the bulk catch_up. Non-zero means the port-write
+    /// guard is triggering.
+    pub fn idle_skip_aborted(&self) -> u64 {
+        self.cpu.idle_skip_aborted
     }
 
     /// Diagnostic: cumulative master cycles skipped by the idle-loop fast path.

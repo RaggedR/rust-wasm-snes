@@ -781,7 +781,9 @@ impl Ppu {
     ///   bit 6: half-math (divide result by 2)
     ///
     /// Order: add/subtract → clamp to [0, 31] → halve per channel.
-    /// Hardware clamps before halving: e.g. (20+20)=40 → clamp 31 → halve 15.
+    /// Hardware clamps before halving:
+    ///   Addition:    (20+20)=40  → clamp 31 → halve 15
+    ///   Subtraction: (5-10)=-5   → clamp 0  → halve 0
     fn blend_colors(&self, main: u16, sub: u16) -> u16 {
         let subtract = self.cgadsub & 0x80 != 0;
         let half = self.cgadsub & 0x40 != 0;

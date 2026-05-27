@@ -106,8 +106,13 @@ pub struct Cpu {
     /// avoid bloating the Cpu struct (256 × u64 = 2 KiB).
     pub opcode_counts: Box<[u64; 256]>,
 
-    /// Number of times the idle-loop fast path fired this run. Diagnostic only.
+    /// Number of times the idle-loop fast path fired cleanly. Diagnostic only.
     pub idle_skip_hits: u64,
+
+    /// Number of times idle-skip aborted because the APU wrote to a port
+    /// during the bulk catch_up. Diagnostic — this counter tells you whether
+    /// the port-write guard is ever triggering.
+    pub idle_skip_aborted: u64,
 
     /// Cumulative master cycles skipped by the idle-loop fast path. Diagnostic.
     pub idle_skip_cycles: u64,
@@ -134,6 +139,7 @@ impl Cpu {
             trace: false,
             opcode_counts: Box::new([0u64; 256]),
             idle_skip_hits: 0,
+            idle_skip_aborted: 0,
             idle_skip_cycles: 0,
         }
     }
@@ -261,7 +267,7 @@ impl Cpu {
             // ~18-cycle chunks (matching unskipped LDA+BEQ cadence) and
             // break early when take_ports_written() returns true, reducing
             // the window where the CPU misses a handshake.
-            self.idle_skip_hits += 1;
+            self.idle_skip_aborted += 1;
             self.idle_skip_cycles += skip;
             return Some(0);
         }

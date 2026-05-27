@@ -263,10 +263,10 @@ impl Dsp {
     }
 
     pub fn new() -> Self {
-        // FLG ($6C) = $E0 at power-on: mute=1, echo-write-disable=1, soft-reset=1.
+        // FLG ($6C) = $E0 at power-on: soft-reset(7) | mute(6) | echo-disable(5).
         // All other registers are zeroed.
         let mut regs = [0u8; 128];
-        regs[0x6C] = 0xE0; // FLG: mute | echo-write-disable | soft-reset
+        regs[0x6C] = 0xE0; // FLG: soft-reset(7) | mute(6) | echo-disable(5)
         Self {
             regs,
             addr_reg: 0,
